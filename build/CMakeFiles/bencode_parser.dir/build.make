@@ -92,6 +92,7 @@ bencode_parser_EXTERNAL_OBJECTS =
 
 bencode_parser: CMakeFiles/bencode_parser.dir/src/main.cpp.o
 bencode_parser: CMakeFiles/bencode_parser.dir/build.make
+bencode_parser: /usr/lib/x86_64-linux-gnu/libcrypto.so
 bencode_parser: CMakeFiles/bencode_parser.dir/link.txt
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/home/hamza/Projects/bencode_parser/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Linking CXX executable bencode_parser"
 	$(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/bencode_parser.dir/link.txt --verbose=$(VERBOSE)
