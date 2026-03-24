@@ -1,3 +1,4 @@
+#pragma once
 #include <variant>
 #include <iostream>
 #include <string>

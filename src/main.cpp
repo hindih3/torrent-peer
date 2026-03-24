@@ -2,6 +2,7 @@
 #include <fstream>
 #include <sstream>
 #include "parser.hpp"
+#include "torrent.hpp"
 #include "utils.hpp"
 
 int main() {
@@ -18,13 +19,7 @@ int main() {
 
     Bencode_parser parser(data);
     Bencode_value value = parser.parse();
-    print_value(value);
 
-    auto [info_start, info_end] = parser.get_info_range();
-    std::string hash = sha1(data, info_start, info_end - info_start);
-
-    std::cout << "info hash: ";
-    for (unsigned char c : hash)
-        std::cout << std::hex << std::setw(2) << std::setfill('0') << (int)c;
-    std::cout << '\n';
+    TorrentFile torrent = parse_torrent(data);
+    print_torrent(torrent);
 }
