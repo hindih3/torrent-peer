@@ -57,10 +57,10 @@ RM = /usr/bin/cmake -E rm -f
 EQUALS = =
 
 # The top-level source directory on which CMake was run.
-CMAKE_SOURCE_DIR = /home/hamza/Projects/bencode_parser
+CMAKE_SOURCE_DIR = /home/hamza/Projects/torrent-peer
 
 # The top-level build directory on which CMake was run.
-CMAKE_BINARY_DIR = /home/hamza/Projects/bencode_parser/build
+CMAKE_BINARY_DIR = /home/hamza/Projects/torrent-peer/build
 
 #=============================================================================
 # Targets provided globally by CMake.
@@ -87,9 +87,9 @@ rebuild_cache/fast: rebuild_cache
 
 # The main all target
 all: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/hamza/Projects/bencode_parser/build/CMakeFiles /home/hamza/Projects/bencode_parser/build//CMakeFiles/progress.marks
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/hamza/Projects/torrent-peer/build/CMakeFiles /home/hamza/Projects/torrent-peer/build//CMakeFiles/progress.marks
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 all
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/hamza/Projects/bencode_parser/build/CMakeFiles 0
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/hamza/Projects/torrent-peer/build/CMakeFiles 0
 .PHONY : all
 
 # The main clean target
@@ -117,24 +117,24 @@ depend:
 .PHONY : depend
 
 #=============================================================================
-# Target rules for targets named bencode_parser
+# Target rules for targets named parser
 
 # Build rule for target.
-bencode_parser: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 bencode_parser
-.PHONY : bencode_parser
+parser: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 parser
+.PHONY : parser
 
 # fast build rule for target.
-bencode_parser/fast:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/bencode_parser.dir/build.make CMakeFiles/bencode_parser.dir/build
-.PHONY : bencode_parser/fast
+parser/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/parser.dir/build.make CMakeFiles/parser.dir/build
+.PHONY : parser/fast
 
 src/main.o: src/main.cpp.o
 .PHONY : src/main.o
 
 # target to build an object file
 src/main.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/bencode_parser.dir/build.make CMakeFiles/bencode_parser.dir/src/main.cpp.o
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/parser.dir/build.make CMakeFiles/parser.dir/src/main.cpp.o
 .PHONY : src/main.cpp.o
 
 src/main.i: src/main.cpp.i
@@ -142,7 +142,7 @@ src/main.i: src/main.cpp.i
 
 # target to preprocess a source file
 src/main.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/bencode_parser.dir/build.make CMakeFiles/bencode_parser.dir/src/main.cpp.i
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/parser.dir/build.make CMakeFiles/parser.dir/src/main.cpp.i
 .PHONY : src/main.cpp.i
 
 src/main.s: src/main.cpp.s
@@ -150,7 +150,7 @@ src/main.s: src/main.cpp.s
 
 # target to generate assembly for a file
 src/main.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/bencode_parser.dir/build.make CMakeFiles/bencode_parser.dir/src/main.cpp.s
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/parser.dir/build.make CMakeFiles/parser.dir/src/main.cpp.s
 .PHONY : src/main.cpp.s
 
 # Help Target
@@ -161,7 +161,7 @@ help:
 	@echo "... depend"
 	@echo "... edit_cache"
 	@echo "... rebuild_cache"
-	@echo "... bencode_parser"
+	@echo "... parser"
 	@echo "... src/main.o"
 	@echo "... src/main.i"
 	@echo "... src/main.s"

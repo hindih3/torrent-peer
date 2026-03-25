@@ -1,1 +1,0 @@
-/usr/bin/g++ -g CMakeFiles/bencode_parser.dir/src/main.cpp.o -o bencode_parser  /usr/lib/x86_64-linux-gnu/libcrypto.so 
