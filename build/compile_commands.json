@@ -1,8 +1,0 @@
-[
-{
-  "directory": "/home/hamza/Projects/bencode_parser/build",
-  "command": "/usr/bin/g++  -I/home/hamza/Projects/bencode_parser/include -g -std=gnu++17 -o CMakeFiles/bencode_parser.dir/src/main.cpp.o -c /home/hamza/Projects/bencode_parser/src/main.cpp",
-  "file": "/home/hamza/Projects/bencode_parser/src/main.cpp",
-  "output": "CMakeFiles/bencode_parser.dir/src/main.cpp.o"
-}
-]

@@ -1,3 +1,0 @@
-/home/hamza/Projects/bencode_parser/build/CMakeFiles/bencode_parser.dir
-/home/hamza/Projects/bencode_parser/build/CMakeFiles/edit_cache.dir
-/home/hamza/Projects/bencode_parser/build/CMakeFiles/rebuild_cache.dir
