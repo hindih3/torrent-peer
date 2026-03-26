@@ -5,6 +5,11 @@
 #include "parser.hpp"
 #include "utils.hpp"
 
+struct Peer {
+    std::string ip;
+    uint16_t port;
+};
+
 struct TorrentFile {
     std::string announce;
     std::string info_hash;
@@ -12,6 +17,7 @@ struct TorrentFile {
     size_t piece_length;
     std::vector<std::string> pieces;
     size_t total_length;
+    std::string peer_id;
 
     struct File {
         size_t length;
@@ -52,6 +58,7 @@ TorrentFile parse_torrent(const std::string& data) {
 
     auto [info_start, info_end] = parser.get_info_range();
     torrent.info_hash = sha1(data, info_start, info_end - info_start);
+    torrent.peer_id = generate_peer_id();
 
     return torrent;
 }

@@ -10,13 +10,8 @@
 #include <netdb.h>
 #include <unistd.h>
 #include "torrent.hpp"
-#include "utils.hpp"
 
-#define BITTORENT_PROTOCOL 0x41727101980;
-struct Peer {
-    std::string ip;
-    uint16_t port;
-};
+constexpr uint64_t BITTORRENT_PROTOCOL = 0x41727101980;
 
 std::vector<uint8_t> build_connect_request(uint32_t transaction_id) {
     std::vector<uint8_t> packet(16);
@@ -54,14 +49,6 @@ uint64_t send_connect(int sockfd, uint32_t transaction_id) {
     uint64_t connection_id;
     memcpy(&connection_id, response + 8, 8);
     return be64toh(connection_id);
-}
-
-std::string generate_peer_id() {
-    std::string id = "-TP0001-";
-    for (int i = 0; i < 12; ++i) {
-        id += "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"[rand() % 62];
-    }
-    return id;
 }
 
 std::vector<Peer> announce(int sockfd, uint64_t connection_id,

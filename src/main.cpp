@@ -1,8 +1,7 @@
 #include <iostream>
 #include <fstream>
 #include <sstream>
-#include "torrent.hpp"
-#include "tracker.hpp"
+#include "peer.hpp"
 
 int main(int argc, char* argv[]) {
     if (argc < 2)
@@ -18,13 +17,17 @@ int main(int argc, char* argv[]) {
 
     TorrentFile torrent = parse_torrent(data);
     print_torrent(torrent);
-
+    srand(time(nullptr));
     std::cout << "\nFetching peers...\n";
     std::vector<Peer> peers = get_peers(torrent);
-
     std::cout << "Got " << peers.size() << " peers:\n";
-    for (const auto& peer : peers)
+    for (const auto& peer : peers) {
         std::cout << peer.ip << ":" << peer.port << "\n";
-
+        try {
+            do_handshake(peer, torrent);
+        } catch (const std::exception& e) {
+            std::cerr << "Handshake failed: " << e.what() << "\n";
+        }
+    }
     return 0;
 }

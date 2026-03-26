@@ -57,3 +57,11 @@ struct sockaddr_in createIPv4Address(const char* ip, int port) {
 
     return address;
 }
+
+std::string generate_peer_id() {
+    std::string id = "-TP0001-";
+    for (int i = 0; i < 12; ++i) {
+        id += "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"[rand() % 62];
+    }
+    return id;
+}
