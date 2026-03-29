@@ -4,6 +4,7 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <string.h>
+#include <stdexcept>
 
 std::string sha1(const std::string& data, size_t start, size_t length) {
     unsigned char hash[20];
@@ -29,10 +30,15 @@ struct TrackerAddress {
 };
 
 TrackerAddress parse_tracker_url(const std::string& url) {
-    if (url.substr(0, 6) != "udp://")
+    const std::string prefix = "udp://";
+    if (url.substr(0, prefix.size()) != prefix)
         throw std::runtime_error("Only UDP trackers supported: " + url);
 
-    std::string rest = url.substr(6);
+    std::string rest = url.substr(prefix.size());
+
+    size_t slash_pos = rest.find('/');
+    if (slash_pos != std::string::npos)
+        rest = rest.substr(0, slash_pos);
 
     size_t colon = rest.rfind(':');
     if (colon == std::string::npos)

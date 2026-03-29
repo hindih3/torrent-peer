@@ -40,8 +40,8 @@ TorrentFile parse_torrent(const std::string& data) {
     Bencode_parser parser(data);
     Bencode_value val = parser.parse();
 
-    const auto& dict = val.get_dict();
-    const auto& info = dict.at("info").get_dict();
+    const Bencode_value::Dict& dict = val.get_dict();
+    const Bencode_value::Dict& info = dict.at("info").get_dict();
 
     torrent.announce = dict.at("announce").get_string();
     torrent.name = info.at("name").get_string();
@@ -50,10 +50,21 @@ TorrentFile parse_torrent(const std::string& data) {
     
     torrent.total_length = 0;
     if (info.count("files"))  {
-        for (const auto& file : info.at("files").get_list())
-            torrent.total_length += file.get_dict().at("length").get_int();
+        for (const auto& file : info.at("files").get_list()) {
+            auto dict = file.get_dict();
+            size_t length = dict.at("length").get_int();
+            torrent.total_length += length;
+
+            std::string path;
+            for (auto& p : dict.at("path").get_list())
+                path += p.get_string() + "/";
+
+            torrent.files.push_back({length, path});
+        }
     } else {
+        torrent.name = info.at("name").get_string();
         torrent.total_length = info.at("length").get_int();
+        torrent.files.push_back({ torrent.total_length, torrent.name });
     }
 
     auto [info_start, info_end] = parser.get_info_range();
@@ -63,7 +74,7 @@ TorrentFile parse_torrent(const std::string& data) {
     return torrent;
 }
 
-void print_torrent(const TorrentFile& torrent) {
+void print_torrent(const TorrentFile& torrent, bool PRINT_FILES = false) {
     std::cout << "Name:         " << torrent.name << "\n";
     std::cout << "Announce:     " << torrent.announce << "\n";
     std::cout << "Total length: " << torrent.total_length << " bytes\n";
@@ -73,4 +84,10 @@ void print_torrent(const TorrentFile& torrent) {
     for (unsigned char c : torrent.info_hash)
         std::cout << std::hex << std::setw(2) << std::setfill('0') << (int)c;
     std::cout << std::dec << "\n";
+
+    if (PRINT_FILES && !torrent.files.empty()) {
+        std::cout << "Files:\n";
+        for (const auto& file : torrent.files)
+            std::cout << "  " << file.path << " (" << file.length << " bytes)\n";
+    }
 }

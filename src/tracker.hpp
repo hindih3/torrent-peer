@@ -85,7 +85,7 @@ uint32_t transaction_id, const TorrentFile& torrent) {
     if (send(sockfd, announce_request.data(), announce_request.size(), 0) == -1)
         throw std::runtime_error(std::string("send: ") + strerror(errno));
 
-    uint8_t response[1024];
+    uint8_t response[2048];
     int response_len = recv(sockfd, response, sizeof(response), 0);
     if (response_len == -1)
         throw std::runtime_error(std::string("recv: ") + strerror(errno));
@@ -102,7 +102,7 @@ uint32_t transaction_id, const TorrentFile& torrent) {
     std::vector<Peer> peers;
     int num_peers = (response_len - 20) / 6;
 
-    for (int i = 0; i < num_peers; i++) {
+    for (int i = 0; i < num_peers; ++i) {
         uint8_t* peer_data = response + 20 + (i * 6);
 
         char ip[INET_ADDRSTRLEN];

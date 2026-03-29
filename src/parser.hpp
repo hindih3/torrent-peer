@@ -1,6 +1,7 @@
 #pragma once
 #include <variant>
 #include <iostream>
+#include <iomanip>
 #include <string>
 #include <vector>
 #include <map>
@@ -25,6 +26,10 @@ public:
     Bencode_value(const List& v) : value(v) {}
     Bencode_value(const Dict& v) : value(v) {}
 
+    Bencode_value(std::string&& v) : value(std::move(v)) {}
+    Bencode_value(List&& v) : value(std::move(v)) {}
+    Bencode_value(Dict&& v) : value(std::move(v)) {}
+
     bool is_int() const { return std::holds_alternative<llong>(value); }
     bool is_string() const { return std::holds_alternative<std::string>(value); }
     bool is_list() const { return std::holds_alternative<List>(value); }
@@ -38,8 +43,6 @@ public:
     Dict& get_dict() { return std::get<Dict>(value); }
 
     const Variant& get_variant() const { return value; }
-
-    friend std::ostream& operator<<(std::ostream& os, const Bencode_value& val);
 };
 
 class Bencode_parser {
@@ -117,10 +120,10 @@ public:
         if (pos + length > data.size())
             throw std::runtime_error("String length out of bounds");
 
-        std::string_view str_view(&data[pos], length);
+        std::string str(data.data() + pos, length);
         pos += length;
 
-        return Bencode_value(std::string(str_view));
+        return Bencode_value(std::move(str));
     }
 
     Bencode_value parse_list() {
@@ -135,11 +138,11 @@ public:
             if (data[pos] == 'e')
                 break;
 
-            list.push_back(parse_value());
+            list.emplace_back(parse_value());
         }
         ++pos;
 
-        return Bencode_value(list);
+        return Bencode_value(std::move(list));
     }
 
     Bencode_value parse_dict() {
@@ -169,7 +172,7 @@ public:
         }
 
         pos++;
-        return Bencode_value(dict);
+        return Bencode_value(std::move(dict));
     }
 
     std::pair<size_t, size_t> get_info_range() const {
@@ -200,7 +203,7 @@ void print_value(const Bencode_value& val, std::ostream& os = std::cout, int ind
         } else {
             os << "<hex:";
             for (unsigned char c : s) {
-                os << std::hex << (int)c;
+                os << std::hex << std::setw(2) << std::setfill('0') << (int)c;
             }
             os << ">";
             os << std::dec;
