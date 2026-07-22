@@ -10,6 +10,9 @@ find_package(OpenSSL REQUIRED)
 include_directories(include)
 add_executable(parser
     src/main.cpp
+        src/main.cpp
+        src/main.cpp
+        src/peer.hpp
 )
 
 target_link_libraries(parser OpenSSL::Crypto)
