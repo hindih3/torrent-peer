@@ -1,4 +1,3 @@
-*.cpp
 *.txt
 *.torrent
 cmake-build-*/
