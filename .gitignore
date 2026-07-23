@@ -1,4 +1,6 @@
 *.cpp
 *.txt
 *.torrent
+cmake-build-*/
+build/
 build/
