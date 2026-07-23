@@ -3,4 +3,4 @@
 *.torrent
 cmake-build-*/
 build/
-build/
+cmake-build-debug/
