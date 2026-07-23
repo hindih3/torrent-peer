@@ -1,46 +1,30 @@
 #pragma once
+#include <string>
+#include <vector>
+#include <iomanip>
 #include "parser.hpp"
 #include "utils.hpp"
-#include <optional>
-#include <iostream>
-#include <iomanip>
 
-struct FileInfo {
-    int64_t length;
-    std::vector<std::string> path;
+struct Peer {
+    std::string ip;
+    uint16_t port;
 };
 
 struct TorrentFile {
-
-    // tracker
     std::string announce;
-    std::vector<std::vector<std::string>> announce_list;
-    std::vector<std::string> url_list;
-
-    // informational field
-    std::optional<std::string> comment;
-    std::optional<std::string> created_by;
-    std::optional<int64_t> creation_date;
-    std::optional<std::string> encoding;
-
-    // info dict
+    std::string info_hash;
     std::string name;
-    int64_t piece_length;
+    size_t piece_length;
     std::vector<std::string> pieces;
-    std::array<uint8_t, 20> info_hash;
+    size_t total_length;
+    std::string peer_id;
 
-    // single-file
-    std::optional<int64_t> length;
-
-    // multi-file
-    std::optional<std::vector<FileInfo>> files;
-
-    uint64_t total_length;
+    struct File {
+        size_t length;
+        std::string path;
+    };
+    std::vector<File> files;
 };
-
-bool is_multifile(const TorrentFile& t) {
-    return t.files.has_value();
-}
 
 std::vector<std::string> generate_pieces(const Bencode_value::Dict& info) {
     std::vector<std::string> pieces;
@@ -51,138 +35,59 @@ std::vector<std::string> generate_pieces(const Bencode_value::Dict& info) {
     return pieces;
 }
 
-uint64_t piece_size(const TorrentFile& t, size_t piece_index) {
-    if (piece_index == t.pieces.size() - 1)
-        return t.total_length - (piece_index * t.piece_length);
-    return t.piece_length;
-}
-
-uint64_t calculate_total_length(const TorrentFile& t) {
-    if (t.length.has_value())
-        return t.length.value();
-    uint64_t total = 0;
-    for (const auto& f : t.files.value())
-        total += f.length;
-    return total;
-}
-
 TorrentFile parse_torrent(const std::string& data) {
     TorrentFile torrent;
     Bencode_parser parser(data);
-    Bencode_value root = parser.parse();
+    Bencode_value val = parser.parse();
 
-    const Bencode_value::Dict& dict = root.get_dict();
+    const Bencode_value::Dict& dict = val.get_dict();
     const Bencode_value::Dict& info = dict.at("info").get_dict();
 
-    if (auto it = dict.find("announce"); it != dict.end())
-        torrent.announce = it->second.get_string();
-    if (auto it = dict.find("announce-list"); it != dict.end()) {
-        for (const auto& tier : it->second.get_list()) {
-            std::vector<std::string> t;
-            for (const auto& url : tier.get_list())
-                t.push_back(url.get_string());
-            torrent.announce_list.push_back(std::move(t));
-        }
-    }
-
-    if (auto it = dict.find("url-list"); it != dict.end())
-        for (const auto& url : it->second.get_list())
-            torrent.url_list.push_back(url.get_string());
-
-    if (auto it = info.find("length"); it != info.end())
-        torrent.length = it->second.get_int();
-
-    if (auto it = info.find("files"); it != info.end()) {
-        std::vector<FileInfo> files;
-        for (const auto& f : it->second.get_list()) {
-            FileInfo file;
-            file.length = f.get_dict().at("length").get_int();
-            for (const auto& p : f.get_dict().at("path").get_list())
-                file.path.push_back(p.get_string());
-            files.push_back(std::move(file));
-        }
-        torrent.files = std::move(files);
-    }
-
-    if (auto it = dict.find("comment"); it != dict.end())
-        torrent.comment = it->second.get_string();
-    if (auto it = dict.find("created by"); it != dict.end())
-        torrent.created_by = it->second.get_string();
-    if (auto it = dict.find("creation date"); it != dict.end())
-        torrent.creation_date = it->second.get_int();
-    if (auto it = dict.find("encoding"); it != dict.end())
-        torrent.encoding = it->second.get_string();
-
+    torrent.announce = dict.at("announce").get_string();
     torrent.name = info.at("name").get_string();
     torrent.piece_length = info.at("piece length").get_int();
     torrent.pieces = generate_pieces(info);
+    
+    torrent.total_length = 0;
+    if (info.count("files"))  {
+        for (const auto& file : info.at("files").get_list()) {
+            auto dict = file.get_dict();
+            size_t length = dict.at("length").get_int();
+            torrent.total_length += length;
+
+            std::string path;
+            for (auto& p : dict.at("path").get_list())
+                path += p.get_string() + "/";
+
+            torrent.files.push_back({length, path});
+        }
+    } else {
+        torrent.name = info.at("name").get_string();
+        torrent.total_length = info.at("length").get_int();
+        torrent.files.push_back({ torrent.total_length, torrent.name });
+    }
 
     auto [info_start, info_end] = parser.get_info_range();
     torrent.info_hash = sha1(data, info_start, info_end - info_start);
-
-    torrent.total_length = calculate_total_length(torrent);
+    torrent.peer_id = generate_peer_id();
 
     return torrent;
 }
 
+void print_torrent(const TorrentFile& torrent, bool PRINT_FILES = false) {
+    std::cout << "Name:         " << torrent.name << "\n";
+    std::cout << "Announce:     " << torrent.announce << "\n";
+    std::cout << "Total length: " << torrent.total_length << " bytes\n";
+    std::cout << "Piece length: " << torrent.piece_length << " bytes\n";
+    std::cout << "Pieces:       " << torrent.pieces.size() << "\n";
+    std::cout << "Info hash:    ";
+    for (unsigned char c : torrent.info_hash)
+        std::cout << std::hex << std::setw(2) << std::setfill('0') << (int)c;
+    std::cout << std::dec << "\n";
 
-void print_torrent(const TorrentFile& t, bool flag = false) {
-    std::cout << "Name: " << t.name << '\n';
-    std::cout << "Announce: " << t.announce << '\n';
-    std::cout << "Piece length: " << t.piece_length << '\n';
-    std::cout << "Number of pieces: " << t.pieces.size() << '\n';
-
-    if (t.length) std::cout << "Length: " << *t.length << '\n';
-    else std::cout << "Length: (none)\n";
-
-    if (t.files && flag == true) {
+    if (PRINT_FILES && !torrent.files.empty()) {
         std::cout << "Files:\n";
-        for (const auto& f : *t.files) {
-            std::cout << "  - path: ";
-            for (const auto& p : f.path)
-                std::cout << p << "/";
-            std::cout << " length: " << f.length << '\n';
-        }
-    } else {
-        std::cout << "Files: (none / not shown)\n";
+        for (const auto& file : torrent.files)
+            std::cout << "  " << file.path << " (" << file.length << " bytes)\n";
     }
-
-    if (t.comment) std::cout << "Comment: " << *t.comment << '\n';
-    else std::cout << "Comment: (none)\n";
-
-    if (t.created_by) std::cout << "Created by: " << *t.created_by << '\n';
-    else std::cout << "Created by: (none)\n";
-
-    if (t.creation_date) std::cout << "Creation date: " << *t.creation_date << '\n';
-    else std::cout << "Creation date: (none)\n";
-
-    if (t.encoding) std::cout << "Encoding: " << *t.encoding << '\n';
-    else std::cout << "Encoding: (none)\n";
-
-    std::cout << "Announce list:\n";
-    if (t.announce_list.empty()) {
-        std::cout << "  (none)\n";
-    } else {
-        for (const auto& tier : t.announce_list) {
-            std::cout << "  tier: ";
-            for (const auto& url : tier)
-                std::cout << url << " ";
-            std::cout << '\n';
-        }
-    }
-
-    std::cout << "URL list:\n";
-    if (t.url_list.empty()) {
-        std::cout << "  (none)\n";
-    } else {
-        for (const auto& url : t.url_list)
-            std::cout << "  " << url << '\n';
-    }
-
-    std::cout << "Info hash: ";
-    for (uint8_t b : t.info_hash)
-        std::cout << std::hex << (int)b;
-
-    std::cout << std::dec << '\n';
-    std::cout << "Total length: " << t.total_length << '\n';
 }

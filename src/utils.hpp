@@ -5,54 +5,23 @@
 #include <arpa/inet.h>
 #include <string.h>
 #include <stdexcept>
-#include <array>
 
-std::array<uint8_t, 20> sha1(const std::string& data, size_t start, size_t length) {
-    if (start > data.size() || length > data.size() - start) {
-        throw std::out_of_range("sha1: start/length out of range");
-    }
-
-    std::array<uint8_t, 20> result{};
+std::string sha1(const std::string& data, size_t start, size_t length) {
     unsigned char hash[20];
-    unsigned int hash_len = 0;
-
     EVP_MD_CTX* ctx = EVP_MD_CTX_new();
-    if (!ctx) {
-        throw std::runtime_error("sha1: failed to create EVP_MD_CTX");
-    }
-
-    if (EVP_DigestInit_ex(ctx, EVP_sha1(), nullptr) != 1 ||
-        EVP_DigestUpdate(ctx, data.data() + start, length) != 1 ||
-        EVP_DigestFinal_ex(ctx, hash, &hash_len) != 1) {
-        EVP_MD_CTX_free(ctx);
-        throw std::runtime_error("sha1: OpenSSL digest operation failed");
-    }
-
+    EVP_DigestInit_ex(ctx, EVP_sha1(), nullptr);
+    EVP_DigestUpdate(ctx, data.data() + start, length);
+    unsigned int hash_len;
+    EVP_DigestFinal_ex(ctx, hash, &hash_len);
     EVP_MD_CTX_free(ctx);
-
-    std::copy(hash, hash + 20, result.begin());
-    return result;
+    return std::string(reinterpret_cast<char*>(hash), 20);
 }
-
 
 int createUDPIpv4Socket() {
     int fd = socket(AF_INET, SOCK_DGRAM, 0);
     if (fd == -1)
         throw std::runtime_error(std::string("socket: ") + strerror(errno));
     return fd;
-}
-
-int createTCPIpv4Socket() {
-    int fd = socket(AF_INET, SOCK_STREAM, 0);
-    return fd;
-}
-
-std::string generate_peer_id() {
-    std::string id = "-HB0002-";
-    for (int i = 0; i < 12; ++i) {
-        id += "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"[rand() % 62];
-    }
-    return id;
 }
 
 struct TrackerAddress {
@@ -79,4 +48,26 @@ TrackerAddress parse_tracker_url(const std::string& url) {
         rest.substr(0, colon),
         rest.substr(colon + 1)
     };
+}
+
+struct sockaddr_in createIPv4Address(const char* ip, int port) {
+    struct sockaddr_in address = {0};
+
+    address.sin_family = AF_INET;
+    address.sin_port = htons(port);
+
+    if (ip == NULL || ip[0] == '\0')
+        address.sin_addr.s_addr = INADDR_ANY;
+    else
+        inet_pton(AF_INET, ip, &address.sin_addr);
+
+    return address;
+}
+
+std::string generate_peer_id() {
+    std::string id = "-TP0001-";
+    for (int i = 0; i < 12; ++i) {
+        id += "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"[rand() % 62];
+    }
+    return id;
 }

@@ -1,7 +1,6 @@
 #pragma once
 #include <variant>
 #include <iostream>
-#include <iomanip>
 #include <string>
 #include <vector>
 #include <map>
@@ -9,31 +8,29 @@
 #include <algorithm>
 #include <cctype>
 
+using llong = long long;
+
 class Bencode_value {
 public:
     using List = std::vector<Bencode_value>;
     using Dict = std::map<std::string, Bencode_value>;
-    using Variant = std::variant<int64_t, std::string, List, Dict>;
+    using Variant = std::variant<llong, std::string, List, Dict>;
 
 private:
     Variant value;
 
 public:
-    Bencode_value(int64_t v) : value(v) {}
+    Bencode_value(llong v) : value(v) {}
     Bencode_value(const std::string& v) : value(v) {}
     Bencode_value(const List& v) : value(v) {}
     Bencode_value(const Dict& v) : value(v) {}
 
-    Bencode_value(std::string&& v) : value(std::move(v)) {}
-    Bencode_value(List&& v) : value(std::move(v)) {}
-    Bencode_value(Dict&& v) : value(std::move(v)) {}
-
-    bool is_int() const { return std::holds_alternative<int64_t>(value); }
+    bool is_int() const { return std::holds_alternative<llong>(value); }
     bool is_string() const { return std::holds_alternative<std::string>(value); }
     bool is_list() const { return std::holds_alternative<List>(value); }
     bool is_dict() const { return std::holds_alternative<Dict>(value); }
 
-    int64_t get_int() const { return std::get<int64_t>(value); }
+    llong get_int() const { return std::get<llong>(value); }
     const std::string& get_string() const { return std::get<std::string>(value); }
     const List& get_list() const { return std::get<List>(value); }
     const Dict& get_dict() const { return std::get<Dict>(value); }
@@ -41,6 +38,8 @@ public:
     Dict& get_dict() { return std::get<Dict>(value); }
 
     const Variant& get_variant() const { return value; }
+
+    friend std::ostream& operator<<(std::ostream& os, const Bencode_value& val);
 };
 
 class Bencode_parser {
@@ -63,6 +62,9 @@ public:
     }
 
     Bencode_value parse_value() {
+        if (pos >= data.size())
+            throw std::runtime_error("Unexpected end of input");
+
         char c = data[pos];
         if (c == 'i') return parse_int();
         if (c == 'l') return parse_list();
@@ -76,17 +78,17 @@ public:
         ++pos;
 
         size_t start = pos;
-
+        
         if (pos < data.size() && data[pos] == '-')
             ++pos;
-
+            
         while (pos < data.size() && std::isdigit((unsigned char)data[pos]))
             ++pos;
 
         if (pos >= data.size() || data[pos] != 'e')
             throw std::runtime_error("Unterminated integer");
 
-        std::string num = data.substr(start, pos - start);
+        auto num = data.substr(start, pos - start);
         ++pos;
 
         if (num.empty())
@@ -115,10 +117,10 @@ public:
         if (pos + length > data.size())
             throw std::runtime_error("String length out of bounds");
 
-        std::string str(data.data() + pos, length);
+        std::string_view str_view(&data[pos], length);
         pos += length;
 
-        return Bencode_value(std::move(str));
+        return Bencode_value(std::string(str_view));
     }
 
     Bencode_value parse_list() {
@@ -133,11 +135,11 @@ public:
             if (data[pos] == 'e')
                 break;
 
-            list.emplace_back(parse_value());
+            list.push_back(parse_value());
         }
         ++pos;
 
-        return Bencode_value(std::move(list));
+        return Bencode_value(list);
     }
 
     Bencode_value parse_dict() {
@@ -151,7 +153,7 @@ public:
                 throw std::runtime_error("Unterminated dict");
             if (data[pos] == 'e')
                 break;
-
+                
             std::string key = parse_string().get_string();
 
             if (!last_key.empty() && key < last_key)
@@ -167,7 +169,7 @@ public:
         }
 
         pos++;
-        return Bencode_value(std::move(dict));
+        return Bencode_value(dict);
     }
 
     std::pair<size_t, size_t> get_info_range() const {
@@ -179,9 +181,9 @@ void print_value(const Bencode_value& val, std::ostream& os = std::cout, int ind
     const auto& var = val.get_variant();
     std::string padding(indent, ' ');
 
-    if (std::holds_alternative<int64_t>(var)) {
-        os << std::get<int64_t>(var);
-    }
+    if (std::holds_alternative<llong>(var)) {
+        os << std::get<llong>(var);
+    } 
     else if (std::holds_alternative<std::string>(var)) {
         const std::string& s = std::get<std::string>(var);
 
@@ -198,7 +200,7 @@ void print_value(const Bencode_value& val, std::ostream& os = std::cout, int ind
         } else {
             os << "<hex:";
             for (unsigned char c : s) {
-                os << std::hex << std::setw(2) << std::setfill('0') << (int)c;
+                os << std::hex << (int)c;
             }
             os << ">";
             os << std::dec;

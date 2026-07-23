@@ -1,18 +1,14 @@
 cmake_minimum_required(VERSION 3.10)
-project(torrent-peer)
-
+project(bencode_parser)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 find_package(OpenSSL REQUIRED)
 
 include_directories(include)
-add_executable(parser
+add_executable(bencode_parser
     src/main.cpp
-        src/main.cpp
-        src/main.cpp
-        src/peer.hpp
+    src/parser.hpp
 )
 
-target_link_libraries(parser OpenSSL::Crypto)
+target_link_libraries(bencode_parser OpenSSL::Crypto)
