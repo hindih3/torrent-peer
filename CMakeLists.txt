@@ -6,9 +6,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
 find_package(OpenSSL REQUIRED)
 
 include_directories(include)
-add_executable(bencode_parser
+add_executable(torrent-peer
     src/main.cpp
-    src/parser.hpp
 )
 
-target_link_libraries(bencode_parser OpenSSL::Crypto)
+target_link_libraries(torrent-peer OpenSSL::Crypto)
