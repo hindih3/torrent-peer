@@ -1,8 +1,0 @@
-[
-{
-  "directory": "/home/hamza/Projects/torrent-peer/build",
-  "command": "/usr/bin/c++  -I/home/hamza/Projects/torrent-peer/include -std=gnu++17 -o CMakeFiles/parser.dir/src/main.cpp.o -c /home/hamza/Projects/torrent-peer/src/main.cpp",
-  "file": "/home/hamza/Projects/torrent-peer/src/main.cpp",
-  "output": "CMakeFiles/parser.dir/src/main.cpp.o"
-}
-]
