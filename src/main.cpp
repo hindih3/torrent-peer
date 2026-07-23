@@ -2,6 +2,8 @@
 #include <fstream>
 #include <sstream>
 #include <ctime>
+#include <unistd.h>
+
 #include "peer.hpp"
 
 int main(int argc, char** argv) {
