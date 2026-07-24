@@ -4,7 +4,7 @@
 #include <ctime>
 #include <unistd.h>
 
-#include "peer.hpp"
+#include "session.hpp"
 
 int main(int argc, char** argv) {
     if (argc < 2) {
@@ -43,6 +43,8 @@ int main(int argc, char** argv) {
             std::cerr << "no peers available\n";
             return 1;
         }
+
+        message_loop(connections, torrent);
 
         for (const auto& c : connections)
             close(c.sockfd);

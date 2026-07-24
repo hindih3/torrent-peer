@@ -2,7 +2,6 @@
 #include "torrent.hpp"
 #include <string>
 #include <vector>
-#include <cstdint>
 
 constexpr uint64_t BITTORRENT_PROTOCOL = 0x41727101980;
 

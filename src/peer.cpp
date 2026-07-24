@@ -11,12 +11,14 @@
 #include <poll.h>
 #include <sys/socket.h>
 
-struct PendingHandshake {
-    int sockfd;
-    Peer peer;
-    std::array<uint8_t, 68> buffer;
-    size_t received = 0;
-};
+namespace {
+    struct PendingHandshake {
+        int sockfd;
+        Peer peer;
+        std::array<uint8_t, 68> buffer;
+        size_t received = 0;
+    };
+}
 
 std::vector<uint8_t> build_handshake(const TorrentFile& torrent,
                                      const std::string& peer_id) {
