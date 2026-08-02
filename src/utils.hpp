@@ -83,7 +83,7 @@ inline std::string generate_peer_id() {
     static constexpr char charset[] =
         "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
-    std::string id = "-TP0001-";
+    std::string id = "-HB0002-";
     for (int i = 0; i < 12; ++i)
         id += charset[rand() % 62];
 

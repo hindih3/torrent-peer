@@ -200,6 +200,9 @@ std::vector<Peer> announce(const std::vector<TrackerSession>& sessions,
             if (ntohl(action) != 1)                           continue;
             if (ntohl(txn_id) != sessions[i].transaction_id)  continue;
 
+            std::vector<Peer> tracker_peers = parse_peers(response, n);
+            std::cerr << sessions[i].url << ": " << tracker_peers.size() << " peers\n";
+
             for (const Peer& p : parse_peers(response, n))
                 peers[p.host + ":" + p.port] = p;
 
@@ -234,5 +237,61 @@ TrackerCandidate create_connected_socket(const std::string& url) {
     }
 
     freeaddrinfo(res);
-    return { fd, url };
+    return { .sockfd = fd, .url = url };
+}
+
+std::vector<Peer> contact_trackers(const TorrentFile& torrent,
+                                   const std::string& peer_id) {
+    if (peer_id.size() != 20)
+        throw std::runtime_error("peer_id must be exactly 20 bytes");
+
+    for (const auto& tier : torrent.announce_list) {
+        std::vector<TrackerCandidate> candidates;
+
+        for (const auto& url : tier) {
+            try {
+                candidates.push_back(create_connected_socket(url));
+                std::cerr << "connected: " << url << "\n";
+            } catch (const std::exception& e) {
+                std::cerr << "failed: " << url << " : " << e.what() << "\n";
+            }
+        }
+
+        if (candidates.empty()) {
+            std::cerr << "tier empty, skipping\n";
+            continue;
+        }
+
+        uint32_t transaction_id = rand();
+
+        std::vector<TrackerSession> sessions = connect_trackers(candidates, transaction_id);
+
+        for (const auto& c : candidates) {
+            bool kept = false;
+            for (const auto& s : sessions)
+                if (s.sockfd == c.sockfd) { kept = true; break; }
+            if (!kept) close(c.sockfd);
+        }
+
+        if (sessions.empty()) {
+            std::cerr << "no connect responses from tier\n";
+            continue;
+        }
+
+        std::cerr << sessions.size() << " tracker(s) responded to connect\n";
+
+        std::vector<Peer> peers = announce(sessions, torrent, peer_id);
+
+        for (const auto& s : sessions)
+            close(s.sockfd);
+
+        if (peers.empty()) {
+            std::cerr << "no announce responses from tier\n";
+            continue;
+        }
+
+        return peers;
+    }
+
+    throw std::runtime_error("All tiers failed");
 }
