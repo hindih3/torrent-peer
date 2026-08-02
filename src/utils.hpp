@@ -3,12 +3,10 @@
 #include <array>
 #include <string>
 #include <cstdint>
-#include <iomanip>
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <string.h>
 #include <stdexcept>
-#include <cstdlib>
 
 inline std::array<uint8_t, 20> sha1(const std::string& data, size_t start, size_t length) {
     std::array<uint8_t, 20> hash{};
@@ -60,6 +58,7 @@ struct TrackerAddress {
 };
 
 inline TrackerAddress parse_tracker_url(const std::string& url) {
+    // udp://exodus.desync.com:6969/announce
     const std::string prefix = "udp://";
     if (url.substr(0, prefix.size()) != prefix)
         throw std::runtime_error("Only UDP trackers supported: " + url);

@@ -1,4 +1,5 @@
 #include "tracker.hpp"
+#include <chrono>
 #include <stdexcept>
 #include <cstring>
 #include <iostream>
@@ -9,6 +10,8 @@
 #include <netdb.h>
 #include <unistd.h>
 #include <poll.h>
+#include <unordered_map>
+#include <algorithm>
 
 void print_tracker_session(const TrackerSession& session) {
     std::cout << "sockfd:           " << session.sockfd << '\n';
@@ -31,60 +34,70 @@ std::vector<uint8_t> build_connect_request(uint32_t transaction_id) {
     return packet;
 }
 
-void send_connect(const std::vector<int>& sockets, uint32_t transaction_id) {
+std::vector<TrackerSession> connect_trackers(const std::vector<TrackerCandidate>& candidates,
+                                          const uint32_t transaction_id) {
+
     auto packet = build_connect_request(transaction_id);
 
-    for (int fd : sockets)
-        send(fd, packet.data(), packet.size(), 0);
-}
+    for (const auto&[sockfd, url] : candidates)
+        send(sockfd, packet.data(), packet.size(), 0);
 
-std::vector<TrackerSession> recv_connect(const std::vector<int>& sockets,
-                                          uint32_t transaction_id) {
+    std::vector<TrackerSession> connected_trackers;
+
     std::vector<pollfd> fds;
-    for (int fd : sockets) {
-        pollfd pfd;
-        pfd.fd      = fd;
-        pfd.events  = POLLIN;
-        pfd.revents = 0;
+    for (const TrackerCandidate& candidate : candidates) {
+        pollfd pfd{};
+        pfd.fd     = candidate.sockfd;
+        pfd.events = POLLIN;
         fds.push_back(pfd);
     }
 
-    std::vector<TrackerSession> live;
-    int timeout_ms = 5000;
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    size_t responded = 0;
+    while (responded < candidates.size()) {
 
-    int ready = poll(fds.data(), fds.size(), timeout_ms);
-    if (ready == -1)
-        throw std::runtime_error(std::string("poll: ") + strerror(errno));
-    if (ready == 0)
-        return live;
+        auto now = std::chrono::steady_clock::now();
+        if (now >= deadline) break;
+        int timeout_ms = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now).count();
 
-    for (size_t i = 0; i < fds.size(); i++) {
-        if (!(fds[i].revents & POLLIN))
-            continue;
+        int ready = poll(fds.data(), fds.size(), timeout_ms);
 
-        uint8_t response[16];
-        ssize_t n = recv(sockets[i], response, 16, 0);
-        if (n < 16)
-            continue;
+        if (ready == 0) break;
+        if (ready == -1) throw std::runtime_error(std::string("poll: ") + strerror(errno));
 
-        uint32_t action, txn_id;
-        memcpy(&action, response,     4);
-        memcpy(&txn_id, response + 4, 4);
+        for (size_t i = 0; i < fds.size(); i++) {
+            if (!(fds[i].revents & POLLIN))
+                continue;
 
-        if (ntohl(action) != 0)              continue;
-        if (ntohl(txn_id) != transaction_id) continue;
+            uint8_t response[16];
+            ssize_t n = recv(candidates[i].sockfd, response, 16, 0);
+            if (n < 16)
+                continue;
 
-        uint64_t connection_id;
-        memcpy(&connection_id, response + 8, 8);
 
-        TrackerSession session;
-        session.sockfd         = sockets[i];
-        session.connection_id  = be64toh(connection_id);
-        session.transaction_id = transaction_id;
-        live.push_back(session);
+            uint32_t action, txn_id;
+            memcpy(&action, response,     4);
+            memcpy(&txn_id, response + 4, 4);
+
+            if (ntohl(action) != 0)              continue;
+            if (ntohl(txn_id) != transaction_id) continue;
+
+            uint64_t connection_id;
+            memcpy(&connection_id, response + 8, 8);
+
+            TrackerSession session;
+            session.sockfd = candidates[i].sockfd;
+            session.connection_id  = be64toh(connection_id);
+            session.transaction_id = transaction_id;
+            session.url = candidates[i].url;
+
+            connected_trackers.push_back(session);
+
+            fds[i].fd = -1;
+            responded++;
+        }
     }
-
-    return live;
+    return connected_trackers;
 }
 
 std::vector<uint8_t> build_announce_request(const TrackerSession& session,
@@ -101,7 +114,7 @@ std::vector<uint8_t> build_announce_request(const TrackerSession& session,
     uint64_t downloaded = htobe64(0);
     uint64_t left       = htobe64(torrent.total_length);
     uint64_t uploaded   = htobe64(0);
-    uint32_t event      = htonl(2);          // started
+    uint32_t event      = htonl(2);
     uint32_t ip         = 0;
     uint32_t key        = htonl(rand());
     int32_t  num_want   = htonl(-1);
@@ -124,67 +137,85 @@ std::vector<uint8_t> build_announce_request(const TrackerSession& session,
     return announce_request;
 }
 
-void send_announce(const std::vector<TrackerSession>& sessions,
-                    const TorrentFile& torrent,
-                    const std::string& peer_id) {
+std::vector<Peer> parse_peers(const uint8_t* response, ssize_t n) {
+    std::vector<Peer> out;
+    int num_peers = (n - 20) / 6;
+    for (int j = 0; j < num_peers; j++) {
+        const uint8_t* peer_data = response + 20 + j * 6;
+
+        char ip[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, peer_data, ip, sizeof(ip));
+
+        uint16_t peer_port;
+        memcpy(&peer_port, peer_data + 4, 2);
+
+        out.push_back({ std::string(ip), std::to_string(ntohs(peer_port)) });
+    }
+    return out;
+}
+
+std::vector<Peer> announce(const std::vector<TrackerSession>& sessions,
+                           const TorrentFile& torrent,
+                           const std::string& peer_id) {
+    std::unordered_map<std::string, Peer> peers;
+
     for (const auto& session : sessions) {
         auto packet = build_announce_request(session, torrent, peer_id);
         send(session.sockfd, packet.data(), packet.size(), 0);
     }
-}
 
-std::vector<Peer> recv_announce(const std::vector<TrackerSession>& sessions) {
     std::vector<pollfd> fds;
-    for (const auto& session : sessions) {
-        pollfd pfd;
-        pfd.fd      = session.sockfd;
-        pfd.events  = POLLIN;
-        pfd.revents = 0;
+    for (const TrackerSession& session : sessions) {
+        pollfd pfd{};
+        pfd.fd     = session.sockfd;
+        pfd.events = POLLIN;
         fds.push_back(pfd);
     }
 
-    int ready = poll(fds.data(), fds.size(), 5000);
-    if (ready == -1)
-        throw std::runtime_error(std::string("poll: ") + strerror(errno));
-    if (ready == 0)
-        return {};
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    size_t responded = 0;
 
-    for (size_t i = 0; i < fds.size(); i++) {
-        if (!(fds[i].revents & POLLIN))
-            continue;
+    while (responded < sessions.size()) {
+        auto now = std::chrono::steady_clock::now();
+        if (now >= deadline) break;
 
-        uint8_t response[2048];
-        ssize_t n = recv(sessions[i].sockfd, response, sizeof(response), 0);
-        if (n < 20) continue;
+        int timeout_ms = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now).count();
 
-        uint32_t action, txn_id;
-        memcpy(&action, response,     4);
-        memcpy(&txn_id, response + 4, 4);
+        int ready = poll(fds.data(), fds.size(), timeout_ms);
+        if (ready == 0) break;
+        if (ready == -1) throw std::runtime_error(std::string("poll: ") + strerror(errno));
 
-        if (ntohl(action) != 1)                           continue;
-        if (ntohl(txn_id) != sessions[i].transaction_id)  continue;
+        for (size_t i = 0; i < fds.size(); i++) {
+            if (!(fds[i].revents & POLLIN))
+                continue;
 
-        std::vector<Peer> peers;
-        int num_peers = (n - 20) / 6;
-        for (int j = 0; j < num_peers; j++) {
-            uint8_t* peer_data = response + 20 + (j * 6);
+            uint8_t response[2048];
+            ssize_t n = recv(sessions[i].sockfd, response, sizeof(response), 0);
+            if (n < 20) continue;
 
-            char ip[INET_ADDRSTRLEN];
-            inet_ntop(AF_INET, peer_data, ip, sizeof(ip));
+            uint32_t action, txn_id;
+            memcpy(&action, response,     4);
+            memcpy(&txn_id, response + 4, 4);
 
-            uint16_t peer_port;
-            memcpy(&peer_port, peer_data + 4, 2);
+            if (ntohl(action) != 1)                           continue;
+            if (ntohl(txn_id) != sessions[i].transaction_id)  continue;
 
-            peers.push_back({std::string(ip), std::to_string(ntohs(peer_port))});
+            for (const Peer& p : parse_peers(response, n))
+                peers[p.host + ":" + p.port] = p;
+
+            fds[i].fd = -1;
+            responded++;
         }
-
-        return peers;   // first valid response wins
     }
 
-    return {};
+    std::vector<Peer> peer_pool;
+    peer_pool.reserve(peers.size());
+    std::transform(peers.begin(), peers.end(), std::back_inserter(peer_pool),
+                   [](const auto& peer) { return peer.second; });
+    return peer_pool;
 }
 
-int create_connected_socket(const std::string& url) {
+TrackerCandidate create_connected_socket(const std::string& url) {
     auto [host, port] = parse_tracker_url(url);   // throws on non-UDP
 
     addrinfo hints{}, *res;
@@ -203,61 +234,5 @@ int create_connected_socket(const std::string& url) {
     }
 
     freeaddrinfo(res);
-    return fd;
-}
-
-std::vector<Peer> contact_trackers(const TorrentFile& torrent,
-                                    const std::string& peer_id) {
-    for (const auto& tier : torrent.announce_list) {
-        std::vector<int> sockets;
-
-        for (const auto& url : tier) {
-            try {
-                sockets.push_back(create_connected_socket(url));
-                std::cerr << "connected: " << url << "\n";
-            } catch (const std::exception& e) {
-                std::cerr << "failed: " << url << " : " << e.what() << "\n";
-            }
-        }
-
-        if (sockets.empty()) {
-            std::cerr << "tier empty, skipping\n";
-            continue;
-        }
-
-        uint32_t transaction_id = rand();
-
-        send_connect(sockets, transaction_id);
-        std::vector<TrackerSession> live = recv_connect(sockets, transaction_id);
-
-        // close sockets that never answered
-        for (int fd : sockets) {
-            bool kept = false;
-            for (const auto& s : live)
-                if (s.sockfd == fd) { kept = true; break; }
-            if (!kept) close(fd);
-        }
-
-        if (live.empty()) {
-            std::cerr << "no connect responses from tier\n";
-            continue;
-        }
-
-        std::cerr << live.size() << " tracker(s) responded to connect\n";
-
-        send_announce(live, torrent, peer_id);
-        std::vector<Peer> peers = recv_announce(live);
-
-        for (const auto& s : live)
-            close(s.sockfd);
-
-        if (peers.empty()) {
-            std::cerr << "no announce responses from tier\n";
-            continue;
-        }
-
-        return peers;
-    }
-
-    throw std::runtime_error("All tiers failed");
+    return { fd, url };
 }
