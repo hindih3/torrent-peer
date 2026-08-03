@@ -12,6 +12,7 @@ add_executable(torrent-peer
         src/session.hpp
         src/torrent.cpp
         src/tracker.cpp
+        src/session.cpp
 )
 
 target_include_directories(torrent-peer PRIVATE src)

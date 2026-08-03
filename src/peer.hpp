@@ -2,6 +2,7 @@
 #include "tracker.hpp"
 #include <vector>
 #include <string>
+#include <array>
 
 struct PendingHandshake {
     int sockfd;
