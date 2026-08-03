@@ -11,13 +11,6 @@
 #include <poll.h>
 #include <sys/socket.h>
 
-struct PendingHandshake {
-    int sockfd;
-    Peer peer;
-    std::array<uint8_t, 68> buffer;
-    size_t received = 0;
-};
-
 std::vector<uint8_t> build_handshake(const TorrentFile& torrent,
                                      const std::string& peer_id) {
     if (peer_id.size() != 20)
@@ -112,6 +105,25 @@ std::vector<PeerSocket> tcp_connect_peers(const std::vector<Peer>& peers) {
     return connected;
 }
 
+bool send_all(int fd, const uint8_t* data, size_t len) {
+    size_t sent = 0;
+    while (sent < len) {
+        ssize_t n = send(fd, data + sent, len - sent, 0);
+        if (n > 0) {
+            sent += n;
+            continue;
+        }
+        if (n == -1 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            pollfd pfd{ fd, POLLOUT, 0 };
+            if (poll(&pfd, 1, 5000) <= 0)
+                return false;
+            continue;
+        }
+        return false;
+    }
+    return true;
+}
+
 std::vector<PeerConnection> handshake_peers(const std::vector<PeerSocket>& sockets,
                                             const TorrentFile& torrent,
                                             const std::string& peer_id) {
@@ -119,7 +131,7 @@ std::vector<PeerConnection> handshake_peers(const std::vector<PeerSocket>& socke
 
     std::vector<PendingHandshake> pending;
     for (const auto& s : sockets) {
-        if (send(s.sockfd, hs.data(), hs.size(), 0) == -1) {
+        if (!send_all(s.sockfd, hs.data(), hs.size())) {
             close(s.sockfd);
             continue;
         }
