@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <sys/socket.h>
 #include <arpa/inet.h>
-#include <string.h>
+#include <cstring>
 #include <stdexcept>
 
 inline std::array<uint8_t, 20> sha1(const std::string& data, size_t start, size_t length) {

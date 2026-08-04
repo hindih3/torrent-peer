@@ -8,11 +8,12 @@ find_package(OpenSSL REQUIRED)
 
 add_executable(torrent-peer
         src/main.cpp
-        src/peer.cpp
-        src/session.hpp
-        src/torrent.cpp
-        src/tracker.cpp
-        src/session.cpp
+        src/net/peer.cpp
+        src/net/session.hpp
+        src/bencode/torrent.cpp
+        src/net/tracker.cpp
+        src/net/session.cpp
+        src/bencode/parser.cpp
 )
 
 target_include_directories(torrent-peer PRIVATE src)

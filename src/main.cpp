@@ -5,7 +5,7 @@
 #include <unistd.h>
 #include <sys/poll.h>
 
-#include "session.hpp"
+#include "net/session.hpp"
 
 static void run_message_loop(std::vector<PeerConnection>& conns) {
     while (!conns.empty()) {
