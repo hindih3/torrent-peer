@@ -25,7 +25,8 @@ struct PeerConnection {
     bool peer_interested = false;
 
     std::vector<bool> piece_array;
-    std::vector<uint8_t> recv_buffer;
+    std::vector<uint8_t> write_buffer;
+    std::vector<uint8_t> read_buffer;
 };
 
 bool send_all(int fd, const uint8_t* data, size_t len);

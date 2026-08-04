@@ -42,6 +42,7 @@ std::vector<PeerSocket> tcp_connect_peers(const std::vector<Peer>& peers) {
             continue;
 
         int fd = createTCPIpv4Socket();
+        if (fd < 0) continue;
 
         int flags = fcntl(fd, F_GETFL, 0);
         fcntl(fd, F_SETFL, flags | O_NONBLOCK);
