@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <sys/poll.h>
 
+#include "download/disk_manager.hpp"
 #include "net/session.hpp"
 
 static void run_message_loop(std::vector<PeerConnection>& conns) {
@@ -64,29 +65,25 @@ int main(int argc, char** argv) {
 
     try {
         TorrentFile torrent = parse_torrent(buffer.str());
-        print_torrent(torrent);
+        print_torrent(torrent, true);
 
-        std::string peer_id = generate_peer_id();
+        DiskManager disk(torrent, "./downloads");
+        std::cout << std::filesystem::absolute("./downloads") << "\n";
+        std::cout << "DiskManager worked\n";
 
-        std::vector<Peer> peers = contact_trackers(torrent, peer_id);
-        std::cerr << peers.size() << " peers from tracker\n";
+        CompletedPiece piece;
+        piece.index = 0;
+        piece.data.resize(torrent.piece_length);
 
-        std::vector<PeerSocket> sockets = tcp_connect_peers(peers);
-        std::cerr << sockets.size() << " TCP connections established\n";
+        std::fill(piece.data.begin(), piece.data.end(), 0x42);
 
-        std::vector<PeerConnection> connections =
-            handshake_peers(sockets, torrent, peer_id);
-        std::cerr << connections.size() << " peers handshaked\n";
+        disk.write_piece(piece);
+        auto block = disk.read_block(piece.index, 0, piece.data.size());
+        bool same = block == piece.data;
 
-        if (connections.empty()) {
-            std::cerr << "no peers available\n";
-            return 1;
-        }
+        std::cout << (same ? "MATCH" : "MISMATCH") << "\n";
+        std::cout << "\n";
 
-        run_message_loop(connections);
-
-        for (const auto& c : connections)
-            close(c.sockfd);
 
     } catch (const std::exception& e) {
         std::cerr << "error: " << e.what() << "\n";

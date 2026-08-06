@@ -14,6 +14,13 @@ add_executable(torrent-peer
         src/net/tracker.cpp
         src/net/session.cpp
         src/bencode/parser.cpp
+        src/download/piece_manager.cpp
+        src/download/piece_manager.hpp
+        src/download/common.hpp
+        src/download/disk_manager.cpp
+        src/download/disk_manager.hpp
+        src/download/peer_manager.cpp
+        src/download/peer_manager.hpp
 )
 
 target_include_directories(torrent-peer PRIVATE src)
