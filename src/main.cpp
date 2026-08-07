@@ -14,8 +14,7 @@ int main(int argc, char** argv) {
         std::cerr << "usage: torrent-peer <file.torrent>\n";
         return 1;
     }
-
-    srand(time(nullptr));
+    const std::filesystem::path out_dir = (argc >= 3) ? argv[2] : std::filesystem::current_path();
 
     std::ifstream file(argv[1], std::ios::binary);
     if (!file) {
@@ -38,7 +37,8 @@ int main(int argc, char** argv) {
 
     if (conns.empty()) { std::cerr << "no peers\n"; return 1; }
 
-    Session session(torrent, std::move(conns), "/home/hamza/CLionProjects/torrent-peer/downloads");
+    Session session(torrent, std::move(conns), out_dir);
+    std::cerr << "saving to " << std::filesystem::absolute(out_dir) << "\n";
     session.run();
     return 0;
 }
