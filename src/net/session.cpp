@@ -65,7 +65,6 @@ void Session::run() {
             last_report = now;
         }
     }
-
     std::cerr << "\n";
 
     if (pieces_.is_complete()) {

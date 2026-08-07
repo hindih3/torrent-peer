@@ -59,7 +59,12 @@ std::vector<PeerEvent> PeerManager::poll_once(int timeout_ms) {
     std::vector<pollfd>   pfds;
     std::vector<uint32_t> ids;
     for (auto& [id, c] : conns_) {
-        pfds.push_back({c.sockfd, POLLIN, 0});
+        // Only ask for POLLOUT when there is something queued. A healthy socket
+        // is almost always writable, so requesting it unconditionally makes
+        // poll() return instantly every iteration
+        short events_mask = POLLIN;
+        if (!c.write_buffer.empty()) events_mask |= POLLOUT;
+        pfds.push_back({c.sockfd, events_mask, 0});
         ids.push_back(id);
     }
 
@@ -71,13 +76,29 @@ std::vector<PeerEvent> PeerManager::poll_once(int timeout_ms) {
     std::vector<uint32_t> to_drop;
 
     for (size_t k = 0; k < pfds.size(); ++k) {
-        if (!(pfds[k].revents & (POLLIN | POLLERR | POLLHUP)))
-            continue;
+        if (pfds[k].revents == 0) continue;
 
         uint32_t id = ids[k];
         auto it = conns_.find(id);
         if (it == conns_.end()) continue;
         PeerConnection& c = it->second;
+
+        // Drain queued writes first so the peer stays fed.
+        if (pfds[k].revents & POLLOUT) {
+            ssize_t w = ::send(c.sockfd, c.write_buffer.data(),
+                               c.write_buffer.size(), MSG_NOSIGNAL);
+            if (w < 0) {
+                if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
+                    to_drop.push_back(id);
+                    continue;  // socket is gone; don't try to read from it
+                }
+            } else {
+                c.write_buffer.erase(c.write_buffer.begin(),
+                                     c.write_buffer.begin() + w);
+            }
+        }
+
+        if (!(pfds[k].revents & (POLLIN | POLLERR | POLLHUP))) continue;
 
         uint8_t chunk[16384];
         ssize_t n = recv(c.sockfd, chunk, sizeof(chunk), 0);
@@ -187,15 +208,14 @@ void PeerManager::send_interested_all() {
     auto msg = build_message(MSG_INTERESTED);
     for (auto& [id, c] : conns_) {
         c.am_interested = true;
-        send_all(c.sockfd, msg.data(), msg.size());
+        queue(c, msg);
     }
 }
 
 void PeerManager::send_request(uint32_t peer_id, const BlockRequest& req) {
     auto it = conns_.find(peer_id);
     if (it == conns_.end()) return;
-    auto msg = build_request(req);
-    send_all(it->second.sockfd, msg.data(), msg.size());
+    queue(it->second, build_request(req));
     ++it->second.outstanding;
 }
 
@@ -206,5 +226,9 @@ void PeerManager::broadcast_have(uint32_t index) {
     auto msg = build_message(MSG_HAVE, payload);
 
     for (auto& [id, c] : conns_)
-        send_all(c.sockfd, msg.data(), msg.size());
+        queue(c, msg);
+}
+
+void PeerManager::queue(PeerConnection& c, std::vector<uint8_t> msg) {
+    c.write_buffer.insert(c.write_buffer.end(), msg.begin(), msg.end());
 }
