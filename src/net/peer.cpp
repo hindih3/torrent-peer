@@ -188,7 +188,11 @@ std::vector<PeerConnection> handshake_peers(const std::vector<PeerSocket>& socke
                 continue;
             }
 
-            verified.push_back({p.sockfd, p.peer});
+            PeerConnection c;
+            c.sockfd     = p.sockfd;
+            c.peer       = p.peer;
+            c.has_pieces = Bitfield(torrent.pieces.size());
+            verified.push_back(std::move(c));
             std::cerr << "handshake ok: " << p.peer.host << ":" << p.peer.port << "\n";
         }
 

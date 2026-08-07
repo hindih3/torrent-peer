@@ -1,3 +1,4 @@
+#include <csignal>
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -7,44 +8,6 @@
 
 #include "download/disk_manager.hpp"
 #include "net/session.hpp"
-
-static void run_message_loop(std::vector<PeerConnection>& conns) {
-    while (!conns.empty()) {
-        std::vector<pollfd> pfds;
-        for (const auto& c : conns)
-            pfds.push_back({ c.sockfd, POLLIN, 0 });
-
-        int ready = poll(pfds.data(), pfds.size(), 5000);
-        if (ready == -1)
-            throw std::runtime_error(std::string("poll: ") + strerror(errno));
-        if (ready == 0) {
-            std::cerr << "5s idle, stopping\n";
-            break;                              // nobody said anything for 5s
-        }
-
-        std::vector<size_t> dead;
-        for (size_t i = 0; i < conns.size(); i++) {
-            if (!(pfds[i].revents & POLLIN))
-                continue;
-
-            uint8_t tmp[4096];
-            ssize_t n = recv(conns[i].sockfd, tmp, sizeof(tmp), 0);
-            if (n <= 0) {                       // 0 = peer closed, -1 = error
-                std::cerr << "dead: " << conns[i].peer.host << "\n";
-                close(conns[i].sockfd);
-                dead.push_back(i);
-                continue;
-            }
-
-            conns[i].read_buffer.insert(conns[i].read_buffer.end(), tmp, tmp + n);
-            parse_messages(conns[i]);
-        }
-
-        // remove dead connections, back-to-front to keep indices valid
-        for (auto it = dead.rbegin(); it != dead.rend(); ++it)
-            conns.erase(conns.begin() + *it);
-    }
-}
 
 int main(int argc, char** argv) {
     if (argc < 2) {
@@ -63,32 +26,19 @@ int main(int argc, char** argv) {
     std::stringstream buffer;
     buffer << file.rdbuf();
 
-    try {
-        TorrentFile torrent = parse_torrent(buffer.str());
-        print_torrent(torrent, true);
+    TorrentFile torrent = parse_torrent(buffer.str());
+    print_torrent(torrent, true);
 
-        DiskManager disk(torrent, "./downloads");
-        std::cout << std::filesystem::absolute("./downloads") << "\n";
-        std::cout << "DiskManager worked\n";
+    std::string peer_id = generate_peer_id();
+    signal(SIGPIPE, SIG_IGN);
 
-        CompletedPiece piece;
-        piece.index = 0;
-        piece.data.resize(torrent.piece_length);
+    auto peers    = contact_trackers(torrent, peer_id);
+    auto sockets  = tcp_connect_peers(peers);
+    auto conns    = handshake_peers(sockets, torrent, peer_id);
 
-        std::fill(piece.data.begin(), piece.data.end(), 0x42);
+    if (conns.empty()) { std::cerr << "no peers\n"; return 1; }
 
-        disk.write_piece(piece);
-        auto block = disk.read_block(piece.index, 0, piece.data.size());
-        bool same = block == piece.data;
-
-        std::cout << (same ? "MATCH" : "MISMATCH") << "\n";
-        std::cout << "\n";
-
-
-    } catch (const std::exception& e) {
-        std::cerr << "error: " << e.what() << "\n";
-        return 1;
-    }
-
+    Session session(torrent, std::move(conns), "/home/hamza/Downloads");
+    session.run();
     return 0;
 }

@@ -1,6 +1,10 @@
 #pragma once
 #include "bencode/torrent.hpp"
 #include "common.hpp"
+
+#include <array>
+#include <chrono>
+#include <cstdint>
 #include <optional>
 #include <unordered_map>
 #include <vector>
@@ -17,14 +21,20 @@ public:
     // return it (moved out) for the caller to write to disk, else nullopt
     std::optional<CompletedPiece> on_block(const Block& block);
 
-    // whole-torrent exit condition
+    void requeue_stale();
+
     bool is_complete() const;
 
+    uint32_t completed() const { return have_count_; }
+    uint32_t total()     const { return piece_count_; }
+    size_t   active()    const { return active_.size(); }
+
 private:
-    enum class BlockState { Missing, Received };
+    enum class BlockState { Missing, Requested, Received };
 
     struct BlockSlot {
         BlockState state = BlockState::Missing;
+        std::chrono::steady_clock::time_point sent_at{};
     };
 
     struct PartialPiece {

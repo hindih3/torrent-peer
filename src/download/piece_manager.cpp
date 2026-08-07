@@ -1,21 +1,24 @@
 #include "piece_manager.hpp"
 
+#include <algorithm>
+#include <cstring>
+
 PieceManager::PieceManager(const TorrentFile& torrent) :
     torrent_(torrent),
-    piece_count_(torrent.pieces.size()),
-    piece_length_(torrent.piece_length),
-    have_(torrent.pieces.size()) {}
+    piece_count_(static_cast<uint32_t>(torrent.pieces.size())),
+    piece_length_(static_cast<uint32_t>(torrent.piece_length)),
+    have_(static_cast<uint32_t>(torrent.pieces.size())) {}
 
 std::optional<BlockRequest> PieceManager::pick_block(const Bitfield& peer_has) {
     auto next_missing = [&](uint32_t index, PartialPiece& pp)
         -> std::optional<BlockRequest> {
         for (uint32_t b = 0; b < pp.blocks.size(); ++b) {
             if (pp.blocks[b].state != BlockState::Missing) continue;
-            pp.blocks[b].state = BlockState::Received;   // naive: mark so we don't re-pick
+            pp.blocks[b].state = BlockState::Requested;  // in flight, not here yet
             uint32_t offset = b * BLOCK_SIZE;
-            uint32_t length = std::min<uint64_t>(
-                BLOCK_SIZE, piece_size(torrent_, index) - offset);
-            return BlockRequest{index, offset, length};
+            uint32_t length = static_cast<uint32_t>(std::min<uint64_t>(
+                BLOCK_SIZE, piece_size(torrent_, index) - offset));
+            return BlockRequest{.piece_index = index, .offset = offset, .length = length};
         }
         return std::nullopt;
     };
@@ -48,6 +51,7 @@ std::optional<CompletedPiece> PieceManager::on_block(const Block& block) {
     std::memcpy(pp.data.data() + block.offset,
                 block.data.data(), block.data.size());
 
+    // Guard against a duplicate delivery double-counting the block.
     if (pp.blocks[b].state != BlockState::Received) ++pp.received;
     pp.blocks[b].state = BlockState::Received;
 
@@ -65,8 +69,17 @@ std::optional<CompletedPiece> PieceManager::on_block(const Block& block) {
     ++have_count_;
     return done;
 }
+
+// called periodically to stop stalls
+void PieceManager::requeue_stale() {
+    for (auto& [index, pp] : active_)
+        for (auto& slot : pp.blocks)
+            if (slot.state == BlockState::Requested)
+                slot.state = BlockState::Missing;
+}
+
 bool PieceManager::is_complete() const {
-    return have_count_ == torrent_.pieces.size();
+    return have_count_ == piece_count_;
 }
 
 PieceManager::PartialPiece& PieceManager::activate(uint32_t index) {

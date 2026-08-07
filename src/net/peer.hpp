@@ -1,5 +1,6 @@
 #pragma once
 #include "tracker.hpp"
+#include "download/common.hpp"
 #include <vector>
 #include <string>
 #include <array>
@@ -17,6 +18,8 @@ struct PeerSocket {
 };
 
 struct PeerConnection {
+    uint32_t id;
+
     int sockfd;
     Peer peer;
     bool am_choking      = true;
@@ -24,9 +27,9 @@ struct PeerConnection {
     bool peer_choking    = true;
     bool peer_interested = false;
 
-    std::vector<bool> piece_array;
-    std::vector<uint8_t> write_buffer;
+    Bitfield             has_pieces;
     std::vector<uint8_t> read_buffer;
+    std::vector<uint8_t> write_buffer;
 };
 
 bool send_all(int fd, const uint8_t* data, size_t len);

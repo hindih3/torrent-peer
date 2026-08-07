@@ -1,41 +1,62 @@
 #include "session.hpp"
 
-void parse_messages(PeerConnection& conn) {
-    while (true) {
-        if (conn.read_buffer.size() < 4)
-            return;
+Session::Session(const TorrentFile& torrent, std::vector<PeerConnection> conns,
+                 const std::filesystem::path& dir)
+    : torrent_(torrent),
+      disk_(torrent, dir),
+      pieces_(torrent),
+      peers_(std::move(conns)) {}
 
-        uint32_t len;
-        memcpy(&len, conn.read_buffer.data(), 4);
-        len = ntohl(len);
+void Session::run() {
+    peers_.send_interested_all();
 
-        if (conn.read_buffer.size() < 4 + len)
-            return;
+    auto last_report = std::chrono::steady_clock::now();
+    uint64_t bytes_since = 0;
 
-        if (len == 0) {
-            conn.read_buffer.erase(conn.read_buffer.begin(),
-                                   conn.read_buffer.begin() + 4);
-            std::cerr << "keep-alive from " << conn.peer.host << "\n";
-            continue;
+    while (!pieces_.is_complete() && !peers_.empty()) {
+        for (auto& ev : peers_.poll_once(1000)) {
+            if (ev.type == PeerEvent::Piece) {
+                bytes_since += ev.block.data.size();
+                if (auto done = pieces_.on_block(ev.block)) {
+                    disk_.write_piece(*done);
+                    peers_.broadcast_have(done->index);
+                }
+            }
         }
 
-        uint8_t  id          = conn.read_buffer[4];
-        uint32_t payload_len  = len - 1;
+        pieces_.requeue_stale();
 
-        switch (id) {
-            case 0: std::cerr << "choke from "          << conn.peer.host << "\n"; break;
-            case 1: std::cerr << "unchoke from "        << conn.peer.host << "\n"; break;
-            case 2: std::cerr << "interested from "     << conn.peer.host << "\n"; break;
-            case 3: std::cerr << "not_interested from " << conn.peer.host << "\n"; break;
-            case 4: std::cerr << "have from "           << conn.peer.host << "\n"; break;
-            case 5: std::cerr << "bitfield from "       << conn.peer.host
-                              << " (" << payload_len << " bytes)\n";               break;
-            case 7: std::cerr << "piece from "          << conn.peer.host << "\n"; break;
-            default: std::cerr << "msg id " << (int)id << " from "
-                               << conn.peer.host << "\n";                          break;
+        for (auto& [id, c] : peers_.connections()) {
+            if (c.peer_choking) continue;
+            if (auto req = pieces_.pick_block(c.has_pieces))
+                peers_.send_request(id, *req);
         }
 
-        conn.read_buffer.erase(conn.read_buffer.begin(),
-                               conn.read_buffer.begin() + 4 + len);
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                           now - last_report).count();
+        if (elapsed >= 1000) {
+            double rate = bytes_since / (elapsed / 1000.0) / 1024.0 / 1024.0; // MiB/s
+            double pct  = 100.0 * pieces_.completed() / pieces_.total();
+
+            std::cerr << "\r"
+                      << pieces_.completed() << "/" << pieces_.total()
+                      << " pieces (" << std::fixed << std::setprecision(1) << pct << "%)  "
+                      << peers_.peer_count() << " peers  "
+                      << std::setprecision(2) << rate << " MiB/s   "
+                      << std::flush;
+
+            bytes_since = 0;
+            last_report = now;
+        }
+    }
+
+    std::cerr << "\n";
+
+    if (pieces_.is_complete()) {
+        disk_.sync();
+        std::cerr << "download complete\n";
+    } else {
+        std::cerr << "ran out of peers\n";
     }
 }
