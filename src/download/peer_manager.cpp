@@ -133,7 +133,6 @@ void PeerManager::handle_message(uint32_t peer_id, const std::vector<uint8_t>& m
 
         case MSG_UNCHOKE:
             c.peer_choking = false;
-            if (c.outstanding > 0) --c.outstanding;
             out.push_back({PeerEvent::Unchoke, peer_id, {}});
             break;
 

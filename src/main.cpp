@@ -38,7 +38,7 @@ int main(int argc, char** argv) {
 
     if (conns.empty()) { std::cerr << "no peers\n"; return 1; }
 
-    Session session(torrent, std::move(conns), "/home/hamza/Downloads");
+    Session session(torrent, std::move(conns), "/home/hamza/CLionProjects/torrent-peer/downloads");
     session.run();
     return 0;
 }
