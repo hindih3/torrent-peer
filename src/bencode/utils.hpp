@@ -3,27 +3,25 @@
 #include <array>
 #include <string>
 #include <cstdint>
-#include <iomanip>
 #include <sys/socket.h>
 #include <arpa/inet.h>
-#include <string.h>
+#include <cstring>
 #include <stdexcept>
-#include <cstdlib>
 
-inline std::array<uint8_t, 20> sha1(const std::string& data, size_t start, size_t length) {
+inline std::array<uint8_t, 20> sha1(const uint8_t* data, size_t len) {
     std::array<uint8_t, 20> hash{};
-
     EVP_MD_CTX* ctx = EVP_MD_CTX_new();
-    if (!ctx)
-        throw std::runtime_error("EVP_MD_CTX_new failed");
-
+    if (!ctx) throw std::runtime_error("EVP_MD_CTX_new failed");
     unsigned int hash_len = 0;
     EVP_DigestInit_ex(ctx, EVP_sha1(), nullptr);
-    EVP_DigestUpdate(ctx, data.data() + start, length);
+    EVP_DigestUpdate(ctx, data, len);
     EVP_DigestFinal_ex(ctx, hash.data(), &hash_len);
     EVP_MD_CTX_free(ctx);
-
     return hash;
+}
+
+inline std::array<uint8_t, 20> sha1(const std::string& data, size_t start, size_t length) {
+    return sha1(reinterpret_cast<const uint8_t*>(data.data() + start), length);
 }
 
 inline int createUDPIpv4Socket() {
@@ -60,6 +58,7 @@ struct TrackerAddress {
 };
 
 inline TrackerAddress parse_tracker_url(const std::string& url) {
+    // udp://exodus.desync.com:6969/announce
     const std::string prefix = "udp://";
     if (url.substr(0, prefix.size()) != prefix)
         throw std::runtime_error("Only UDP trackers supported: " + url);
@@ -84,7 +83,7 @@ inline std::string generate_peer_id() {
     static constexpr char charset[] =
         "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
-    std::string id = "-TP0001-";
+    std::string id = "-HB0002-";
     for (int i = 0; i < 12; ++i)
         id += charset[rand() % 62];
 

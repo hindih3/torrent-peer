@@ -1,10 +1,13 @@
+#include <csignal>
 #include <iostream>
 #include <fstream>
 #include <sstream>
 #include <ctime>
 #include <unistd.h>
+#include <sys/poll.h>
 
-#include "session.hpp"
+#include "download/disk_manager.hpp"
+#include "net/session.hpp"
 
 int main(int argc, char** argv) {
     if (argc < 2) {
@@ -23,36 +26,19 @@ int main(int argc, char** argv) {
     std::stringstream buffer;
     buffer << file.rdbuf();
 
-    try {
-        TorrentFile torrent = parse_torrent(buffer.str());
-        print_torrent(torrent);
+    TorrentFile torrent = parse_torrent(buffer.str());
+    print_torrent(torrent, true);
 
-        std::string peer_id = generate_peer_id();
+    std::string peer_id = generate_peer_id();
+    signal(SIGPIPE, SIG_IGN);
 
-        std::vector<Peer> peers = contact_trackers(torrent, peer_id);
-        std::cerr << peers.size() << " peers from tracker\n";
+    auto peers    = contact_trackers(torrent, peer_id);
+    auto sockets  = tcp_connect_peers(peers);
+    auto conns    = handshake_peers(sockets, torrent, peer_id);
 
-        std::vector<PeerSocket> sockets = tcp_connect_peers(peers);
-        std::cerr << sockets.size() << " TCP connections established\n";
+    if (conns.empty()) { std::cerr << "no peers\n"; return 1; }
 
-        std::vector<PeerConnection> connections =
-            handshake_peers(sockets, torrent, peer_id);
-        std::cerr << connections.size() << " peers handshaked\n";
-
-        if (connections.empty()) {
-            std::cerr << "no peers available\n";
-            return 1;
-        }
-
-        message_loop(connections, torrent);
-
-        for (const auto& c : connections)
-            close(c.sockfd);
-
-    } catch (const std::exception& e) {
-        std::cerr << "error: " << e.what() << "\n";
-        return 1;
-    }
-
+    Session session(torrent, std::move(conns), "/home/hamza/CLionProjects/torrent-peer/downloads");
+    session.run();
     return 0;
 }

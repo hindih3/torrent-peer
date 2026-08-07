@@ -1,8 +1,16 @@
 #pragma once
 #include "tracker.hpp"
+#include "download/common.hpp"
 #include <vector>
 #include <string>
-#include <cstdint>
+#include <array>
+
+struct PendingHandshake {
+    int sockfd;
+    Peer peer;
+    std::array<uint8_t, 68> buffer;
+    size_t received = 0;
+};
 
 struct PeerSocket {
     int sockfd;
@@ -10,6 +18,8 @@ struct PeerSocket {
 };
 
 struct PeerConnection {
+    uint32_t id;
+
     int sockfd;
     Peer peer;
     bool am_choking      = true;
@@ -17,9 +27,14 @@ struct PeerConnection {
     bool peer_choking    = true;
     bool peer_interested = false;
 
-    std::vector<bool> piece_array;
-    std::vector<uint8_t> recv_buffer;
+    int outstanding = 0;
+
+    Bitfield             has_pieces;
+    std::vector<uint8_t> read_buffer;
+    std::vector<uint8_t> write_buffer;
 };
+
+bool send_all(int fd, const uint8_t* data, size_t len);
 
 std::vector<uint8_t> build_handshake(const TorrentFile& torrent,
                                      const std::string& peer_id);
