@@ -33,8 +33,8 @@ public:
 
     std::unordered_map<uint32_t, PeerConnection>& connections() { return conns_; }
     bool empty() const { return conns_.empty(); }
-
     size_t peer_count() const { return conns_.size(); }
+
 private:
     std::unordered_map<uint32_t, PeerConnection> conns_;
     uint32_t next_id_ = 0;
