@@ -21,7 +21,7 @@ public:
     // return it (moved out) for the caller to write to disk, else nullopt
     std::optional<CompletedPiece> on_block(const Block& block);
 
-    void requeue_stale();
+    void requeue_stale(std::chrono::seconds timeout);
 
     bool is_complete() const;
 

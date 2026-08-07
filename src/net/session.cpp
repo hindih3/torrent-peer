@@ -1,5 +1,14 @@
 #include "session.hpp"
 
+#include <chrono>
+#include <iomanip>
+#include <iostream>
+
+namespace {
+constexpr int  kPipelineDepth  = 8;                        // requests in flight per peer
+constexpr auto kRequestTimeout = std::chrono::seconds(30); // before a block goes back in the pool
+}
+
 Session::Session(const TorrentFile& torrent, std::vector<PeerConnection> conns,
                  const std::filesystem::path& dir)
     : torrent_(torrent),
@@ -10,7 +19,7 @@ Session::Session(const TorrentFile& torrent, std::vector<PeerConnection> conns,
 void Session::run() {
     peers_.send_interested_all();
 
-    auto last_report = std::chrono::steady_clock::now();
+    auto     last_report = std::chrono::steady_clock::now();
     uint64_t bytes_since = 0;
 
     while (!pieces_.is_complete() && !peers_.empty()) {
@@ -24,19 +33,25 @@ void Session::run() {
             }
         }
 
-        pieces_.requeue_stale();
+        pieces_.requeue_stale(kRequestTimeout);
 
+        // Keep every unchoked peer's pipe full instead of one block per round
+        // trip: at 50ms RTT a depth of 1 caps a peer at ~320 KiB/s no matter
+        // how much bandwidth is available.
         for (auto& [id, c] : peers_.connections()) {
             if (c.peer_choking) continue;
-            if (auto req = pieces_.pick_block(c.has_pieces))
+            while (c.outstanding < kPipelineDepth) {
+                auto req = pieces_.pick_block(c.has_pieces);
+                if (!req) break;  // this peer has nothing we still need
                 peers_.send_request(id, *req);
+            }
         }
 
-        auto now = std::chrono::steady_clock::now();
+        auto now     = std::chrono::steady_clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                            now - last_report).count();
         if (elapsed >= 1000) {
-            double rate = bytes_since / (elapsed / 1000.0) / 1024.0 / 1024.0; // MiB/s
+            double rate = bytes_since / (elapsed / 1000.0) / 1024.0 / 1024.0;  // MiB/s
             double pct  = 100.0 * pieces_.completed() / pieces_.total();
 
             std::cerr << "\r"

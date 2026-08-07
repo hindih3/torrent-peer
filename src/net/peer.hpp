@@ -27,6 +27,8 @@ struct PeerConnection {
     bool peer_choking    = true;
     bool peer_interested = false;
 
+    int outstanding = 0;
+
     Bitfield             has_pieces;
     std::vector<uint8_t> read_buffer;
     std::vector<uint8_t> write_buffer;

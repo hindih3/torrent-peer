@@ -14,7 +14,9 @@ std::optional<BlockRequest> PieceManager::pick_block(const Bitfield& peer_has) {
         -> std::optional<BlockRequest> {
         for (uint32_t b = 0; b < pp.blocks.size(); ++b) {
             if (pp.blocks[b].state != BlockState::Missing) continue;
-            pp.blocks[b].state = BlockState::Requested;  // in flight, not here yet
+            pp.blocks[b].state   = BlockState::Requested;
+            pp.blocks[b].sent_at = std::chrono::steady_clock::now();
+
             uint32_t offset = b * BLOCK_SIZE;
             uint32_t length = static_cast<uint32_t>(std::min<uint64_t>(
                 BLOCK_SIZE, piece_size(torrent_, index) - offset));
@@ -71,10 +73,11 @@ std::optional<CompletedPiece> PieceManager::on_block(const Block& block) {
 }
 
 // called periodically to stop stalls
-void PieceManager::requeue_stale() {
+void PieceManager::requeue_stale(std::chrono::seconds timeout) {
+    const auto cutoff = std::chrono::steady_clock::now() - timeout;
     for (auto& [index, pp] : active_)
         for (auto& slot : pp.blocks)
-            if (slot.state == BlockState::Requested)
+            if (slot.state == BlockState::Requested && slot.sent_at < cutoff)
                 slot.state = BlockState::Missing;
 }
 

@@ -82,10 +82,12 @@ std::vector<PeerEvent> PeerManager::poll_once(int timeout_ms) {
         uint8_t chunk[16384];
         ssize_t n = recv(c.sockfd, chunk, sizeof(chunk), 0);
 
-        if (n <= 0) {
+        if (n < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) continue;
             to_drop.push_back(id);
             continue;
         }
+        if (n == 0) { to_drop.push_back(id); continue; }
 
         c.read_buffer.insert(c.read_buffer.end(), chunk, chunk + n);
 
@@ -126,10 +128,12 @@ void PeerManager::handle_message(uint32_t peer_id, const std::vector<uint8_t>& m
     switch (id) {
         case MSG_CHOKE:
             c.peer_choking = true;
+            c.outstanding  = 0;
             break;
 
         case MSG_UNCHOKE:
             c.peer_choking = false;
+            if (c.outstanding > 0) --c.outstanding;
             out.push_back({PeerEvent::Unchoke, peer_id, {}});
             break;
 
@@ -170,6 +174,7 @@ void PeerManager::handle_message(uint32_t peer_id, const std::vector<uint8_t>& m
             block.offset      = begin;
             block.data.assign(payload + 8, payload + payload_len);
 
+            if (c.outstanding > 0) --c.outstanding;
             out.push_back({PeerEvent::Piece, peer_id, std::move(block)});
             break;
         }
@@ -192,6 +197,7 @@ void PeerManager::send_request(uint32_t peer_id, const BlockRequest& req) {
     if (it == conns_.end()) return;
     auto msg = build_request(req);
     send_all(it->second.sockfd, msg.data(), msg.size());
+    ++it->second.outstanding;
 }
 
 void PeerManager::broadcast_have(uint32_t index) {
