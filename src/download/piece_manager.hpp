@@ -43,6 +43,8 @@ private:
         uint32_t               received = 0;
     };
 
+    std::optional<BlockRequest> next_missing(uint32_t index, ::PieceManager::PartialPiece &pp) const;
+
     const TorrentFile& torrent_;
     uint32_t piece_count_;
     uint32_t piece_length_;

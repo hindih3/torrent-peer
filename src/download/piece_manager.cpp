@@ -9,26 +9,14 @@ PieceManager::PieceManager(const TorrentFile& torrent) :
     piece_length_(static_cast<uint32_t>(torrent.piece_length)),
     have_(static_cast<uint32_t>(torrent.pieces.size())) {}
 
+
 std::optional<BlockRequest> PieceManager::pick_block(const Bitfield& peer_has) {
-    auto next_missing = [&](uint32_t index, PartialPiece& pp)
-        -> std::optional<BlockRequest> {
-        for (uint32_t b = 0; b < pp.blocks.size(); ++b) {
-            if (pp.blocks[b].state != BlockState::Missing) continue;
-            pp.blocks[b].state   = BlockState::Requested;
-            pp.blocks[b].sent_at = std::chrono::steady_clock::now();
-
-            uint32_t offset = b * BLOCK_SIZE;
-            uint32_t length = static_cast<uint32_t>(std::min<uint64_t>(
-                BLOCK_SIZE, piece_size(torrent_, index) - offset));
-            return BlockRequest{.piece_index = index, .offset = offset, .length = length};
-        }
-        return std::nullopt;
-    };
-
+    // try pieces already in progress
     for (auto& [index, pp] : active_)
         if (peer_has.get(index))
             if (auto r = next_missing(index, pp)) return r;
 
+    // start a new piece
     for (uint32_t i = 0; i < piece_count_; ++i) {
         if (have_.get(i) || active_.count(i) || !peer_has.get(i)) continue;
         return next_missing(i, activate(i));
@@ -70,6 +58,20 @@ std::optional<CompletedPiece> PieceManager::on_block(const Block& block) {
     have_.set(block.piece_index);
     ++have_count_;
     return done;
+}
+
+std::optional<BlockRequest> PieceManager::next_missing(uint32_t index, PartialPiece& pp) const {
+    for (uint32_t b = 0; b < pp.blocks.size(); ++b) {
+        if (pp.blocks[b].state != BlockState::Missing) continue;
+        pp.blocks[b].state   = BlockState::Requested;
+        pp.blocks[b].sent_at = std::chrono::steady_clock::now();
+
+        uint32_t offset = b * BLOCK_SIZE;
+        uint32_t length = static_cast<uint32_t>(std::min<uint64_t>(
+            BLOCK_SIZE, piece_size(torrent_, index) - offset));
+        return BlockRequest{.piece_index = index, .offset = offset, .length = length};
+    }
+    return std::nullopt;
 }
 
 // called periodically to stop stalls

@@ -57,6 +57,8 @@ void pwrite_all(int fd, const uint8_t* buf, uint64_t len, uint64_t offset) {
             if (errno == EINTR) continue;
             throw_errno("pwrite");
         }
+
+        // should never happen, but protects against infinite looping
         if (n == 0) throw std::runtime_error("pwrite wrote 0 bytes");
         done += static_cast<uint64_t>(n);
     }
@@ -71,6 +73,8 @@ void pread_all(int fd, uint8_t* buf, uint64_t len, uint64_t offset) {
             if (errno == EINTR) continue;
             throw_errno("pread");
         }
+
+        // 0 means EOF, either the file is truncated/corrupted or the args are wrong
         if (n == 0) throw std::runtime_error("unexpected EOF while reading");
         done += static_cast<uint64_t>(n);
     }
@@ -82,6 +86,7 @@ DiskManager::DiskManager(const TorrentFile& torrent, const fs::path& download_di
     : piece_length_(static_cast<uint64_t>(torrent.piece_length)),
       total_length_(torrent.total_length),
       piece_count_(static_cast<uint32_t>(torrent.pieces.size())) {
+
     if (piece_length_ == 0) throw std::runtime_error("torrent has piece_length 0");
 
     std::vector<std::pair<fs::path, uint64_t>> layout;
@@ -127,6 +132,9 @@ DiskManager::DiskManager(const TorrentFile& torrent, const fs::path& download_di
 
 // returns index of first FileEntry behind an offset
 size_t DiskManager::locate(const uint64_t offset) const {
+
+    // contrary to what I initially thought, std::lower_bound finds the first element that is
+    // greater than or equal to the value, so upper_bound is plainly simpler and less bug-prone
     auto it = std::upper_bound(files_.begin(), files_.end(), offset,
                                [](uint64_t value, const FileEntry& e) { return value < e.offset; });
     if (it == files_.begin()) throw std::out_of_range("offset before start of torrent");
@@ -140,7 +148,7 @@ void DiskManager::for_each_slice(uint64_t global_offset, uint64_t len, Op op) co
         throw std::out_of_range("range extends past the end of the torrent");
     }
 
-    size_t   index  = locate(global_offset);
+    size_t index  = locate(global_offset);
     uint64_t done = 0;
     while (done < len) {
         const FileEntry& f = files_[index];
