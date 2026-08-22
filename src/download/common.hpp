@@ -2,8 +2,15 @@
 #include <cstdint>
 #include <unistd.h>
 #include <vector>
+#include <cerrno>
+#include <system_error>
+#include <cstring>
 
 constexpr uint32_t BLOCK_SIZE = 16384;
+
+[[noreturn]] inline void throw_errno(const std::string& what, int err = errno) {
+    throw std::system_error(err, std::generic_category(), what);
+}
 
 struct BlockRequest {
     uint32_t piece_index;

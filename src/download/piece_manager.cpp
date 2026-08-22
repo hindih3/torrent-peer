@@ -7,7 +7,8 @@ PieceManager::PieceManager(const TorrentFile& torrent) :
     torrent_(torrent),
     piece_count_(static_cast<uint32_t>(torrent.pieces.size())),
     piece_length_(static_cast<uint32_t>(torrent.piece_length)),
-    have_(static_cast<uint32_t>(torrent.pieces.size())) {}
+    have_(static_cast<uint32_t>(torrent.pieces.size())),
+    piece_frequency_(torrent.pieces.size()) {}
 
 
 std::optional<BlockRequest> PieceManager::pick_block(const Bitfield& peer_has) {

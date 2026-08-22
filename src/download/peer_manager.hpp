@@ -29,7 +29,7 @@ public:
     void send_request(uint32_t peer_id, const BlockRequest& req);
     void broadcast_have(uint32_t index);
 
-    void queue(PeerConnection &c, std::vector<uint8_t> msg);
+    static void queue(PeerConnection &c, std::vector<uint8_t> msg);
 
     std::unordered_map<uint32_t, PeerConnection>& connections() { return conns_; }
     bool empty() const { return conns_.empty(); }

@@ -12,11 +12,6 @@
 namespace fs = std::filesystem;
 
 namespace {
-
-[[noreturn]] void throw_errno(const std::string& what, int err = errno) {
-    throw std::system_error(err, std::generic_category(), what);
-}
-
 fs::path safe_join(const fs::path& root, const std::vector<std::string>& components) {
     fs::path p = root;
     for (const auto& c : components) {

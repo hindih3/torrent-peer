@@ -71,7 +71,11 @@ std::vector<PeerEvent> PeerManager::poll_once(int timeout_ms) {
     if (pfds.empty()) return events;
 
     int ready = poll(pfds.data(), pfds.size(), timeout_ms);
-    if (ready <= 0) return events;
+    if (ready == 0) return events;
+    if (ready < 0) {
+        if (errno == EINTR) return events;
+        throw_errno("poll");
+    }
 
     std::vector<uint32_t> to_drop;
 
