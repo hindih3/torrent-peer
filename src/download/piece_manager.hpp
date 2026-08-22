@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cstdint>
 #include <optional>
+#include <random>
 #include <unordered_map>
 #include <vector>
 
@@ -13,9 +14,11 @@ class PieceManager {
 public:
     explicit PieceManager(const TorrentFile& torrent);
 
-    // given a peer's bitfield, return the next block to request from them,
+    // given a peer's bitfield, return the next block to
+    // request from them using a rarest-first algorithm,
     // or nullopt if they have nothing we still need
-    std::optional<BlockRequest> pick_block(const Bitfield& peer_has);
+    std::optional<BlockRequest> pick_block(const Bitfield& peer_has,
+                                           const std::vector<uint16_t>& availability);
 
     // file an arrived block; if it completes and verifies a piece,
     // return it (moved out) for the caller to write to disk, else nullopt
@@ -51,6 +54,7 @@ private:
 
     Bitfield have_;
     uint32_t have_count_ = 0;
+    std::mt19937 rng_;
 
     std::unordered_map<uint32_t, PartialPiece> active_;
 

@@ -21,7 +21,7 @@ std::vector<uint8_t> build_request(const BlockRequest& req);
 
 class PeerManager {
 public:
-    explicit PeerManager(std::vector<PeerConnection> conns);
+    explicit PeerManager(std::vector<PeerConnection> conns, uint32_t piece_count);
 
     std::vector<PeerEvent> poll_once(int timeout_ms);
 
@@ -32,6 +32,8 @@ public:
     static void queue(PeerConnection &c, std::vector<uint8_t> msg);
 
     std::unordered_map<uint32_t, PeerConnection>& connections() { return conns_; }
+
+    const std::vector<uint16_t>& get_piece_frequency() const { return piece_frequency_; }
     bool empty() const { return conns_.empty(); }
     size_t peer_count() const { return conns_.size(); }
 
@@ -39,6 +41,9 @@ private:
     std::unordered_map<uint32_t, PeerConnection> conns_;
     uint32_t next_id_ = 0;
 
+    std::vector<uint16_t> piece_frequency_;
+
     void handle_message(uint32_t peer_id, const std::vector<uint8_t>& msg,
                         std::vector<PeerEvent>& out);
+    void apply_availability(const Bitfield& bf, int delta);
 };

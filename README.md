@@ -161,12 +161,15 @@ above 1 MiB are refused before any allocation.
 
 ## Roadmap
 
+- [x] **Rarest-first piece selection.** Implemented rarest-first algorithm which uses a frequency
+  array to decide which piece to request next from each peer. Benefits swarm health.
 - [ ] **Seeding.** `DiskManager::read_block` is already implemented for this;
   the peer wire handling for `request` and `cancel` is not.
-- [ ] **Rarest-first piece selection.** Currently picks the first missing piece
-  a peer has, which is simple but bad for swarm health.
 - [ ] **Choking algorithm.** No tit-for-tat; every peer is sent `interested`
   and none are choked.
+- [ ] **HTTP tracker support.** Only UDP trackers (BEP 15) are supported;
+  `http://` and `https://` announce URLs are ignored.
+- [ ] **IPv6.** Peer connections and tracker communication are IPv4 only.
 
 ## Known limitations
 

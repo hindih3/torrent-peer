@@ -19,7 +19,7 @@ Session::Session(const TorrentFile& torrent, std::vector<PeerConnection> conns,
     : torrent_(torrent),
       disk_(torrent, download_dir),
       pieces_(torrent),
-      peers_(std::move(conns)) {}
+      peers_(std::move(conns), torrent.pieces.size()) {}
 
 void Session::run() {
     peers_.send_interested_all();
@@ -65,8 +65,8 @@ void Session::run() {
         for (auto& [id, c] : peers_.connections()) {
             if (c.peer_choking) continue;
             while (c.outstanding < kPipelineDepth) {
-                auto req = pieces_.pick_block(c.has_pieces);
-                if (!req) break;  // this peer has nothing we still need
+                auto req = pieces_.pick_block(c.has_pieces, peers_.get_piece_frequency());
+                if (!req) break;
                 peers_.send_request(id, *req);
             }
         }
@@ -90,7 +90,9 @@ void Session::run() {
 
     if (pieces_.is_complete()) {
         disk_.sync();
-        std::cerr << "download complete\n";
+        std::cerr << "download complete in "
+          << std::fixed << std::setprecision(1)
+          << ms_since(started) / 1000.0 << " s\n";
     } else {
         std::cerr << "ran out of peers\n";
     }

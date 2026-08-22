@@ -27,6 +27,8 @@ struct PeerConnection {
     bool peer_choking    = true;
     bool peer_interested = false;
 
+    bool got_bitfield = false;
+
     int outstanding = 0;
 
     Bitfield             has_pieces;

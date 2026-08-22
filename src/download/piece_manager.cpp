@@ -8,22 +8,37 @@ PieceManager::PieceManager(const TorrentFile& torrent) :
     piece_count_(static_cast<uint32_t>(torrent.pieces.size())),
     piece_length_(static_cast<uint32_t>(torrent.piece_length)),
     have_(static_cast<uint32_t>(torrent.pieces.size())),
-    piece_frequency_(torrent.pieces.size()) {}
+    rng_(std::random_device{}()) {}
 
 
-std::optional<BlockRequest> PieceManager::pick_block(const Bitfield& peer_has) {
-    // try pieces already in progress
+std::optional<BlockRequest>
+PieceManager::pick_block(const Bitfield& peer_has,
+                         const std::vector<uint16_t>& availability) {
+    // finish in-progress pieces first
     for (auto& [index, pp] : active_)
         if (peer_has.get(index))
             if (auto r = next_missing(index, pp)) return r;
 
-    // start a new piece
+    // scan all eligible new pieces, tracking the rarest and collecting ties
+    uint16_t best = std::numeric_limits<uint16_t>::max();
+    std::vector<uint32_t> candidates;
+
     for (uint32_t i = 0; i < piece_count_; ++i) {
         if (have_.get(i) || active_.count(i) || !peer_has.get(i)) continue;
-        return next_missing(i, activate(i));
+
+        uint16_t avail = availability[i];
+        if (avail < best) {
+            best = avail;
+            candidates.clear();
+        }
+        if (avail == best)
+            candidates.push_back(i); // tie
     }
 
-    return std::nullopt;
+    if (candidates.empty()) return std::nullopt;
+
+    uint32_t index = candidates[rng_() % candidates.size()];
+    return next_missing(index, activate(index));
 }
 
 std::optional<CompletedPiece> PieceManager::on_block(const Block& block) {

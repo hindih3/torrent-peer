@@ -45,7 +45,8 @@ static bool extract_message(std::vector<uint8_t>& buf, std::vector<uint8_t>& out
     return true;
 }
 
-PeerManager::PeerManager(std::vector<PeerConnection> conns) {
+PeerManager::PeerManager(std::vector<PeerConnection> conns, uint32_t piece_count)
+    : piece_frequency_(piece_count, 0) {
     for (auto& c : conns) {
         uint32_t id = next_id_++;
         c.id = id;
@@ -128,11 +129,13 @@ std::vector<PeerEvent> PeerManager::poll_once(int timeout_ms) {
 
     for (uint32_t id : to_drop) {
         auto it = conns_.find(id);
-        if (it != conns_.end()) {
-            close(it->second.sockfd);
-            conns_.erase(it);
-            events.push_back({PeerEvent::Dropped, id, {}});
-        }
+        if (it == conns_.end()) continue;
+
+        apply_availability(it->second.has_pieces, -1);
+
+        close(it->second.sockfd);
+        conns_.erase(it);
+        events.push_back({PeerEvent::Dropped, id, {}});
     }
 
     return events;
@@ -176,12 +179,18 @@ void PeerManager::handle_message(uint32_t peer_id, const std::vector<uint8_t>& m
             index = ntohl(index);
             if (index >= c.has_pieces.size()) throw std::runtime_error("have out of range");
             c.has_pieces.set(index);
+            ++piece_frequency_[index];
             break;
         }
 
         case MSG_BITFIELD: {
+            if (c.got_bitfield) throw std::runtime_error("duplicate bitfield");
+            c.got_bitfield = true;
+
             std::vector<uint8_t> raw(payload, payload + payload_len);
             c.has_pieces = Bitfield::from_bytes(raw, c.has_pieces.size());
+
+            apply_availability(c.has_pieces, +1);
             break;
         }
 
@@ -235,4 +244,9 @@ void PeerManager::broadcast_have(uint32_t index) {
 
 void PeerManager::queue(PeerConnection& c, std::vector<uint8_t> msg) {
     c.write_buffer.insert(c.write_buffer.end(), msg.begin(), msg.end());
+}
+
+void PeerManager::apply_availability(const Bitfield& bf, int delta) {
+    for (uint32_t i = 0; i < piece_frequency_.size(); ++i)
+        if (bf.get(i)) piece_frequency_[i] += delta;
 }
