@@ -5,10 +5,13 @@
 #include <unordered_map>
 #include <cstdint>
 
+#define LISTEN_MARKER UINT32_MAX
+
 struct PeerEvent {
-    enum Type { Unchoke, Piece, Dropped } type;
-    uint32_t peer_id;
-    Block    block;   // valid only when type == Piece
+    enum Type { Unchoke, Piece, Dropped, Request } type;
+    uint32_t     peer_id;
+    Block        block;    // valid when type == Piece
+    BlockRequest req;      // valid when type == Request
 };
 
 enum MessageId : uint8_t {
@@ -16,6 +19,7 @@ enum MessageId : uint8_t {
     MSG_HAVE = 4, MSG_BITFIELD = 5, MSG_REQUEST = 6, MSG_PIECE = 7, MSG_CANCEL = 8
 };
 
+int build_listen_fd();
 std::vector<uint8_t> build_message(uint8_t id, const std::vector<uint8_t>& payload = {});
 std::vector<uint8_t> build_request(const BlockRequest& req);
 
@@ -26,7 +30,13 @@ public:
     std::vector<PeerEvent> poll_once(int timeout_ms);
 
     void send_interested_all();
+    void send_to(uint32_t peer_id, const std::vector<uint8_t>& msg);
+    void send_unchoke(uint32_t peer_id);
     void send_request(uint32_t peer_id, const BlockRequest& req);
+    void send_bitfield(uint32_t peer_id, const Bitfield& our_have);
+
+    void send_piece(uint32_t peer_id, uint32_t index, uint32_t begin, const std::vector<uint8_t> &data);
+
     void broadcast_have(uint32_t index);
 
     static void queue(PeerConnection &c, std::vector<uint8_t> msg);
@@ -40,6 +50,7 @@ public:
 private:
     std::unordered_map<uint32_t, PeerConnection> conns_;
     uint32_t next_id_ = 0;
+    int listen_fd_;
 
     std::vector<uint16_t> piece_frequency_;
 

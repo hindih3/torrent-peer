@@ -1,11 +1,33 @@
 #include "peer_manager.hpp"
 
 #include <cstring>
+#include <fcntl.h>
 #include <iostream>
 #include <arpa/inet.h>
 #include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
+
+int build_listen_fd() {
+    int listen_fd = socket(AF_INET, SOCK_STREAM, 0);
+
+    int yes = 1;
+    setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));  // reuse port on restart
+
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_port = htons(6881);
+
+    if (bind(listen_fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) == -1) {
+        throw_errno("listen socket");
+    }
+    listen(listen_fd, 16);
+
+    fcntl(listen_fd, F_SETFL, O_NONBLOCK);
+
+    return listen_fd;
+}
 
 std::vector<uint8_t> build_message(uint8_t id, const std::vector<uint8_t>& payload) {
     uint32_t len = htonl(static_cast<uint32_t>(1 + payload.size()));
@@ -46,7 +68,8 @@ static bool extract_message(std::vector<uint8_t>& buf, std::vector<uint8_t>& out
 }
 
 PeerManager::PeerManager(std::vector<PeerConnection> conns, uint32_t piece_count)
-    : piece_frequency_(piece_count, 0) {
+    : listen_fd_(build_listen_fd()),
+      piece_frequency_(piece_count, 0) {
     for (auto& c : conns) {
         uint32_t id = next_id_++;
         c.id = id;
@@ -194,6 +217,21 @@ void PeerManager::handle_message(uint32_t peer_id, const std::vector<uint8_t>& m
             break;
         }
 
+        case MSG_REQUEST: {
+            if (c.am_choking) break;
+            if (payload_len != 12) throw std::runtime_error("bad request");
+            uint32_t index, begin, length;
+            std::memcpy(&index,  payload,     4);
+            std::memcpy(&begin,  payload + 4, 4);
+            std::memcpy(&length, payload + 8, 4);
+            index = ntohl(index); begin = ntohl(begin); length = ntohl(length);
+
+            if (length > BLOCK_SIZE) throw std::runtime_error("request too large");
+
+            out.push_back({PeerEvent::Request, peer_id, {}, {index, begin, length}});
+            break;
+        }
+
         case MSG_PIECE: {
             if (payload_len < 8) throw std::runtime_error("bad piece");
             uint32_t index, begin;
@@ -225,11 +263,38 @@ void PeerManager::send_interested_all() {
     }
 }
 
+void PeerManager::send_to(uint32_t peer_id, const std::vector<uint8_t>& msg) {
+    auto it = conns_.find(peer_id);
+    if (it != conns_.end())
+        queue(it->second, msg);
+}
+
+void PeerManager::send_bitfield(uint32_t peer_id, const Bitfield& our_have) {
+    send_to(peer_id, build_message(MSG_BITFIELD, our_have.bytes()));
+}
+
+void PeerManager::send_piece(uint32_t peer_id, uint32_t index,
+                             uint32_t begin, const std::vector<uint8_t>& data) {
+    std::vector<uint8_t> payload(8 + data.size());
+    uint32_t i = htonl(index), b = htonl(begin);
+    std::memcpy(payload.data(),     &i, 4);
+    std::memcpy(payload.data() + 4, &b, 4);
+    std::memcpy(payload.data() + 8, data.data(), data.size());
+    send_to(peer_id, build_message(MSG_PIECE, payload));
+}
+
+void PeerManager::send_unchoke(uint32_t peer_id) {
+    auto it = conns_.find(peer_id);
+    if (it == conns_.end()) return;
+    it->second.am_choking = false;
+    send_to(peer_id, build_message(MSG_UNCHOKE));
+}
+
 void PeerManager::send_request(uint32_t peer_id, const BlockRequest& req) {
     auto it = conns_.find(peer_id);
     if (it == conns_.end()) return;
-    queue(it->second, build_request(req));
     ++it->second.outstanding;
+    send_to(peer_id, build_request(req));
 }
 
 void PeerManager::broadcast_have(uint32_t index) {

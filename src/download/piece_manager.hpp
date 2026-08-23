@@ -28,6 +28,8 @@ public:
 
     bool is_complete() const;
 
+    const Bitfield& have_bitfield() const { return have_; }
+    bool have_piece(uint32_t index) const { return have_.get(index); }
     uint32_t completed() const { return have_count_; }
     uint32_t total()     const { return piece_count_; }
     size_t   active()    const { return active_.size(); }
