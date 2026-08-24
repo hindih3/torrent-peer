@@ -16,8 +16,8 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    std::filesystem::path out_dir  = "downloads";
-    uint16_t              port     = 6881;
+    std::filesystem::path out_dir  = "/home/hamza/CLionProjects/torrent-peer/downloads";
+    uint16_t              port     = 51413;
     bool                  use_tracker = true;
     std::vector<Peer>     manual_peers;
 
@@ -59,7 +59,7 @@ int main(int argc, char** argv) {
         std::vector<Peer> peers = manual_peers;
         if (use_tracker) {
             try {
-                auto found = contact_trackers(torrent, peer_id);
+                auto found = contact_trackers(torrent, peer_id, port);
                 peers.insert(peers.end(), found.begin(), found.end());
             } catch (const std::exception& e) {
                 std::cerr << "tracker: " << e.what() << "\n";

@@ -188,7 +188,7 @@ PeerManager::InboundResult PeerManager::advance_inbound(PendingInbound& p, std::
 
     const uint32_t id = c.id;
     conns_.emplace(id, std::move(c));
-    out.push_back({PeerEvent::Joined, id, {}, {}});
+    out.push_back({.type = PeerEvent::Joined, .peer_id = id, .block = {}, .req = {}});
 
     std::cerr << "handshake ok (inbound): " << p.peer.host << ":" << p.peer.port << "\n";
 
@@ -224,7 +224,7 @@ std::vector<PeerEvent> PeerManager::poll_once(int timeout_ms) {
 
     const size_t inbound_at = pfds.size();
     for (const auto& p : inbound_)
-        pfds.push_back({p.sockfd,POLLIN, 0});
+        pfds.push_back({.fd = p.sockfd, .events = POLLIN, .revents = 0});
 
     const size_t conns_at = pfds.size();
     std::vector<uint32_t> ids;
@@ -235,7 +235,7 @@ std::vector<PeerEvent> PeerManager::poll_once(int timeout_ms) {
         // poll() return instantly every iteration
         short events_mask = POLLIN;
         if (!c.write_buffer.empty()) events_mask |= POLLOUT;
-        pfds.push_back({c.sockfd, events_mask, 0});
+        pfds.push_back({.fd = c.sockfd, .events = events_mask, .revents = 0});
         ids.push_back(id);
     }
 
