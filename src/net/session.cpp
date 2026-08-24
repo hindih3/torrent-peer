@@ -15,18 +15,24 @@ int64_t ms_since(std::chrono::steady_clock::time_point t) {
 }
 
 Session::Session(const TorrentFile& torrent, std::vector<PeerConnection> conns,
-                 const std::filesystem::path& download_dir)
+                 const std::filesystem::path& download_dir,
+                 const std::string& peer_id, uint16_t listen_port)
     : torrent_(torrent),
       disk_(torrent, download_dir),
       pieces_(torrent),
-      peers_(std::move(conns), torrent.pieces.size()) {}
+      peers_(std::move(conns), torrent, peer_id, listen_port) {}
+
+// Everything a peer needs on arrival, whether we dialed them or they dialed us.
+void Session::greet(uint32_t id) {
+    peers_.send_bitfield(id, pieces_.have_bitfield());
+    peers_.send_unchoke(id);
+    if (!pieces_.is_complete())
+        peers_.send_interested(id);
+}
 
 void Session::run() {
-    for (auto& [id, c] : peers_.connections()) {
-        peers_.send_bitfield(id, pieces_.have_bitfield());
-        peers_.send_unchoke(id);
-    }
-    peers_.send_interested_all();
+    for (auto& [id, c] : peers_.connections())
+        greet(id);
 
     const auto started = std::chrono::steady_clock::now();
     auto last_report   = started;
@@ -42,6 +48,10 @@ void Session::run() {
                     disk_.write_piece(*done);
                     peers_.broadcast_have(done->index);
                 }
+            }
+
+            else if (ev.type == PeerEvent::Joined) {
+                greet(ev.peer_id);
             }
 
             else if (ev.type == PeerEvent::Request) {

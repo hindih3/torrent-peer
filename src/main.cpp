@@ -11,34 +11,70 @@
 
 int main(int argc, char** argv) {
     if (argc < 2) {
-        std::cerr << "usage: torrent-peer <file.torrent>\n";
-        return 1;
-    }
-    const std::filesystem::path out_dir = (argc >= 3) ? argv[2] : std::filesystem::current_path();
-
-    std::ifstream file(argv[1], std::ios::binary);
-    if (!file) {
-        std::cerr << "could not open: " << argv[1] << "\n";
+        std::cerr << "usage: torrent-peer <file.torrent> [download-dir] "
+                     "[--port N] [--peer host:port] [--no-tracker]\n";
         return 1;
     }
 
-    std::stringstream buffer;
-    buffer << file.rdbuf();
+    std::filesystem::path out_dir  = "downloads";
+    uint16_t              port     = 6881;
+    bool                  use_tracker = true;
+    std::vector<Peer>     manual_peers;
 
-    TorrentFile torrent = parse_torrent(buffer.str());
-    print_torrent(torrent, true);
+    for (int i = 2; i < argc; ++i) {
+        std::string a = argv[i];
+        if (a == "--port" && i + 1 < argc) {
+            port = static_cast<uint16_t>(std::stoi(argv[++i]));
+        } else if (a == "--peer" && i + 1 < argc) {
+            std::string hp = argv[++i];
+            size_t colon = hp.rfind(':');
+            if (colon == std::string::npos) { std::cerr << "--peer wants host:port\n"; return 1; }
+            manual_peers.push_back({hp.substr(0, colon), hp.substr(colon + 1)});
+        } else if (a == "--no-tracker") {
+            use_tracker = false;
+        } else if (!a.empty() && a[0] != '-') {
+            out_dir = a;
+        } else {
+            std::cerr << "unknown option: " << a << "\n";
+            return 1;
+        }
+    }
 
-    std::string peer_id = generate_peer_id();
-    signal(SIGPIPE, SIG_IGN);
+    try {
+        std::ifstream file(argv[1], std::ios::binary);
+        if (!file) {
+            std::cerr << "could not open: " << argv[1] << "\n";
+            return 1;
+        }
 
-    auto peers    = contact_trackers(torrent, peer_id);
-    auto sockets  = tcp_connect_peers(peers);
-    auto conns    = handshake_peers(sockets, torrent, peer_id);
+        std::stringstream buffer;
+        buffer << file.rdbuf();
 
-    if (conns.empty()) { std::cerr << "no peers\n"; return 1; }
+        TorrentFile torrent = parse_torrent(buffer.str());
+        print_torrent(torrent, true);
 
-    Session session(torrent, std::move(conns), out_dir);
-    std::cerr << "saving to " << std::filesystem::absolute(out_dir) << "\n";
-    session.run();
-    return 0;
+        std::string peer_id = generate_peer_id();
+        signal(SIGPIPE, SIG_IGN);
+
+        std::vector<Peer> peers = manual_peers;
+        if (use_tracker) {
+            try {
+                auto found = contact_trackers(torrent, peer_id);
+                peers.insert(peers.end(), found.begin(), found.end());
+            } catch (const std::exception& e) {
+                std::cerr << "tracker: " << e.what() << "\n";
+            }
+        }
+
+        auto sockets = tcp_connect_peers(peers);
+        auto conns   = handshake_peers(sockets, torrent, peer_id);
+
+        std::cerr << "saving to " << std::filesystem::absolute(out_dir) << "\n";
+        Session session(torrent, std::move(conns), out_dir, peer_id, port);
+        session.run();
+        return 0;
+    } catch (const std::exception& e) {
+        std::cerr << "fatal: " << e.what() << "\n";
+        return 1;
+    }
 }

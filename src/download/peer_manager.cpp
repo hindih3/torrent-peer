@@ -8,25 +8,33 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-int build_listen_fd() {
-    int listen_fd = socket(AF_INET, SOCK_STREAM, 0);
+int build_listen_fd(uint16_t port) {
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) return -1;
 
     int yes = 1;
-    setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));  // reuse port on restart
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));  // reuse port on restart
 
     sockaddr_in addr{};
-    addr.sin_family = AF_INET;
+    addr.sin_family      = AF_INET;
     addr.sin_addr.s_addr = INADDR_ANY;
-    addr.sin_port = htons(6881);
+    addr.sin_port        = htons(port);
 
-    if (bind(listen_fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) == -1) {
-        throw_errno("listen socket");
+    if (bind(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
+        std::cerr << "listen: bind " << port << " failed: " << strerror(errno)
+                  << " (inbound peers disabled)\n";
+        close(fd);
+        return -1;
     }
-    listen(listen_fd, 16);
+    if (listen(fd, 32) < 0) {
+        std::cerr << "listen: " << strerror(errno) << " (inbound peers disabled)\n";
+        close(fd);
+        return -1;
+    }
 
-    fcntl(listen_fd, F_SETFL, O_NONBLOCK);
-
-    return listen_fd;
+    int flags = fcntl(fd, F_GETFL, 0);
+    fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+    return fd;
 }
 
 std::vector<uint8_t> build_message(uint8_t id, const std::vector<uint8_t>& payload) {
@@ -67,21 +75,160 @@ static bool extract_message(std::vector<uint8_t>& buf, std::vector<uint8_t>& out
     return true;
 }
 
-PeerManager::PeerManager(std::vector<PeerConnection> conns, uint32_t piece_count)
-    : listen_fd_(build_listen_fd()),
-      piece_frequency_(piece_count, 0) {
+PeerManager::PeerManager(std::vector<PeerConnection> conns,
+                         const TorrentFile& torrent,
+                         std::string peer_id,
+                         uint16_t listen_port,
+                         size_t max_peers)
+    : torrent_(torrent),
+      peer_id_(std::move(peer_id)),
+      piece_count_(static_cast<uint32_t>(torrent.pieces.size())),
+      listen_fd_(build_listen_fd(listen_port)),
+      max_peers_(max_peers),
+      piece_frequency_(torrent.pieces.size(), 0) {
+
+    if (peer_id_.size() != 20)
+        throw std::runtime_error("peer_id must be exactly 20 bytes");
+
     for (auto& c : conns) {
         uint32_t id = next_id_++;
         c.id = id;
         conns_.emplace(id, std::move(c));
+    }
+
+    if (listen_fd_ >= 0)
+        std::cerr << "listening for inbound peers on port " << listen_port << "\n";
+}
+
+PeerManager::~PeerManager() {
+    for (auto& [id, c] : conns_)   if (c.sockfd >= 0) close(c.sockfd);
+    for (auto& p : inbound_)       if (p.sockfd >= 0) close(p.sockfd);
+    if (listen_fd_ >= 0) close(listen_fd_);
+}
+
+// Drain the backlog. A single poll wakeup can cover several pending
+// connections, so this loops until accept() says there is nothing left.
+void PeerManager::accept_new() {
+    if (listen_fd_ < 0) return;
+
+    while (true) {
+        sockaddr_in addr{};
+        socklen_t   len = sizeof(addr);
+        int fd = ::accept(listen_fd_, reinterpret_cast<sockaddr*>(&addr), &len);
+
+        if (fd < 0) {
+            if (errno == ECONNABORTED || errno == EINTR) continue;
+            break;   // EAGAIN/EWOULDBLOCK: backlog drained
+        }
+
+        if (conns_.size() + inbound_.size() >= max_peers_) {
+            close(fd);   // at capacity; let them retry later
+            continue;
+        }
+
+        int flags = fcntl(fd, F_GETFL, 0);
+        fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+
+        char ip[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &addr.sin_addr, ip, sizeof(ip));
+
+        PendingInbound p;
+        p.sockfd  = fd;
+        p.peer    = { std::string(ip), std::to_string(ntohs(addr.sin_port)) };
+        p.started = std::chrono::steady_clock::now();
+
+        std::cerr << "inbound: " << p.peer.host << ":" << p.peer.port << "\n";
+        inbound_.push_back(std::move(p));
+    }
+}
+
+// An inbound peer speaks first, so the order here is the mirror of
+// handshake_peers(): read and verify their 68 bytes, then send ours.
+// recv() is capped at exactly what is missing so that anything the peer
+// pipelined behind the handshake (usually its bitfield) stays in the kernel
+// buffer and is picked up by the normal read path on the next poll.
+PeerManager::InboundResult PeerManager::advance_inbound(PendingInbound& p, std::vector<PeerEvent>& out) {
+    ssize_t n = recv(p.sockfd, p.buffer.data() + p.received, 68 - p.received, 0);
+
+    if (n < 0) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
+            return InboundResult::Keep;
+        return InboundResult::Drop;
+    }
+    if (n == 0) return InboundResult::Drop;   // peer hung up
+
+    p.received += static_cast<size_t>(n);
+    if (p.received < 68) return InboundResult::Keep;
+
+    if (p.buffer[0] != 19 ||
+        std::memcmp(p.buffer.data() + 1, "BitTorrent protocol", 19) != 0) {
+        std::cerr << "inbound " << p.peer.host << ": bad protocol header\n";
+        return InboundResult::Drop;
+    }
+    if (std::memcmp(p.buffer.data() + 28, torrent_.info_hash.data(), 20) != 0) {
+        std::cerr << "inbound " << p.peer.host << ": info hash mismatch\n";
+        return InboundResult::Drop;
+    }
+    // We advertise ourselves to trackers, so trackers hand our address back to
+    // us; without this a client happily connects to itself.
+    if (std::memcmp(p.buffer.data() + 48, peer_id_.data(), 20) == 0) {
+        std::cerr << "inbound " << p.peer.host << ": that is us, dropping\n";
+        return InboundResult::Drop;
+    }
+
+    PeerConnection c;
+    c.id         = next_id_++;
+    c.sockfd     = p.sockfd;
+    c.peer       = p.peer;
+    c.has_pieces = Bitfield(piece_count_);
+
+    // Our reply goes through the same write_buffer as everything else, so a
+    // partial send is handled by the POLLOUT path rather than blocking here.
+    queue(c, build_handshake(torrent_, peer_id_));
+
+    const uint32_t id = c.id;
+    conns_.emplace(id, std::move(c));
+    out.push_back({PeerEvent::Joined, id, {}, {}});
+
+    std::cerr << "handshake ok (inbound): " << p.peer.host << ":" << p.peer.port << "\n";
+
+    p.sockfd = -1;   // ownership moved into conns_; caller must not close it
+    return InboundResult::Promoted;
+}
+
+void PeerManager::expire_inbound(std::chrono::seconds timeout) {
+    const auto cutoff = std::chrono::steady_clock::now() - timeout;
+    for (auto it = inbound_.begin(); it != inbound_.end(); ) {
+        if (it->started < cutoff) {
+            std::cerr << "inbound " << it->peer.host << ": handshake timed out\n";
+            if (it->sockfd >= 0) close(it->sockfd);
+            it = inbound_.erase(it);
+        } else {
+            ++it;
+        }
     }
 }
 
 std::vector<PeerEvent> PeerManager::poll_once(int timeout_ms) {
     std::vector<PeerEvent> events;
 
-    std::vector<pollfd>   pfds;
+    // The fd set is three sections laid out back to back, so a single poll()
+    // covers the listener, half-open inbound sockets, and live peers:
+    //   [0]                          listen_fd_        (if bound)
+    //   [inbound_at, conns_at)       inbound_          (handshake in progress)
+    //   [conns_at, end)              conns_            (peer wire protocol)
+    std::vector<pollfd> pfds;
+
+    const bool listening = listen_fd_ >= 0;
+    if (listening) pfds.push_back({listen_fd_, POLLIN, 0});
+
+    const size_t inbound_at = pfds.size();
+    for (const auto& p : inbound_)
+        pfds.push_back({p.sockfd,POLLIN, 0});
+
+    const size_t conns_at = pfds.size();
     std::vector<uint32_t> ids;
+    ids.reserve(conns_.size());
     for (auto& [id, c] : conns_) {
         // Only ask for POLLOUT when there is something queued. A healthy socket
         // is almost always writable, so requesting it unconditionally makes
@@ -95,16 +242,57 @@ std::vector<PeerEvent> PeerManager::poll_once(int timeout_ms) {
     if (pfds.empty()) return events;
 
     int ready = poll(pfds.data(), pfds.size(), timeout_ms);
-    if (ready == 0) return events;
     if (ready < 0) {
         if (errno == EINTR) return events;
         throw_errno("poll");
     }
 
+    // Even on a timeout, sweep handshakes that have gone quiet.
+    expire_inbound(std::chrono::seconds(15));
+    if (ready == 0) return events;
+
+    // 1. new connections
+    if (listening && (pfds[0].revents & POLLIN))
+        accept_new();
+
+    // 2. handshakes in progress. Walked by index because advance_inbound may
+    //    move an entry into conns_; survivors are rebuilt into a fresh vector
+    //    rather than erased in place.
+    if (!inbound_.empty()) {
+        std::vector<PendingInbound> still_pending;
+        still_pending.reserve(inbound_.size());
+
+        for (size_t i = 0; i < inbound_.size(); ++i) {
+            PendingInbound& p = inbound_[i];
+            const short rev = pfds[inbound_at + i].revents;
+
+            if (rev == 0) {
+                still_pending.push_back(std::move(p));
+                continue;
+            }
+
+            InboundResult r = InboundResult::Drop;
+            if (rev & (POLLIN | POLLERR | POLLHUP))
+                r = advance_inbound(p, events);
+
+            if (r == InboundResult::Keep) {
+                still_pending.push_back(std::move(p));
+            } else if (r == InboundResult::Drop) {
+                if (p.sockfd >= 0) close(p.sockfd);
+            }
+            // Promoted: fd now owned by conns_, do not close, do not keep
+        }
+        inbound_ = std::move(still_pending);
+    }
+
+    // 3. established peers. Note conns_ may have grown in step 2; the new
+    //    entries are not in pfds this round, which is fine because their
+    //    handshake reply is queued and will be flushed on the next poll.
     std::vector<uint32_t> to_drop;
 
-    for (size_t k = 0; k < pfds.size(); ++k) {
-        if (pfds[k].revents == 0) continue;
+    for (size_t k = 0; k < ids.size(); ++k) {
+        const short rev = pfds[conns_at + k].revents;
+        if (rev == 0) continue;
 
         uint32_t id = ids[k];
         auto it = conns_.find(id);
@@ -112,7 +300,7 @@ std::vector<PeerEvent> PeerManager::poll_once(int timeout_ms) {
         PeerConnection& c = it->second;
 
         // Drain queued writes first so the peer stays fed.
-        if (pfds[k].revents & POLLOUT) {
+        if (rev & POLLOUT) {
             ssize_t w = ::send(c.sockfd, c.write_buffer.data(),
                                c.write_buffer.size(), MSG_NOSIGNAL);
             if (w < 0) {
@@ -126,7 +314,7 @@ std::vector<PeerEvent> PeerManager::poll_once(int timeout_ms) {
             }
         }
 
-        if (!(pfds[k].revents & (POLLIN | POLLERR | POLLHUP))) continue;
+        if (!(rev & (POLLIN | POLLERR | POLLHUP))) continue;
 
         uint8_t chunk[16384];
         ssize_t n = recv(c.sockfd, chunk, sizeof(chunk), 0);
@@ -158,7 +346,7 @@ std::vector<PeerEvent> PeerManager::poll_once(int timeout_ms) {
 
         close(it->second.sockfd);
         conns_.erase(it);
-        events.push_back({PeerEvent::Dropped, id, {}});
+        events.push_back({PeerEvent::Dropped, id, {}, {}});
     }
 
     return events;
@@ -184,7 +372,7 @@ void PeerManager::handle_message(uint32_t peer_id, const std::vector<uint8_t>& m
 
         case MSG_UNCHOKE:
             c.peer_choking = false;
-            out.push_back({PeerEvent::Unchoke, peer_id, {}});
+            out.push_back({PeerEvent::Unchoke, peer_id, {}, {}});
             break;
 
         case MSG_INTERESTED:
@@ -263,6 +451,20 @@ void PeerManager::send_interested_all() {
     }
 }
 
+void PeerManager::send_interested(uint32_t peer_id) {
+    auto it = conns_.find(peer_id);
+    if (it == conns_.end()) return;
+    it->second.am_interested = true;
+    queue(it->second, build_message(MSG_INTERESTED));
+}
+
+void PeerManager::send_choke(uint32_t peer_id) {
+    auto it = conns_.find(peer_id);
+    if (it == conns_.end()) return;
+    it->second.am_choking = true;
+    queue(it->second, build_message(MSG_CHOKE));
+}
+
 void PeerManager::send_to(uint32_t peer_id, const std::vector<uint8_t>& msg) {
     auto it = conns_.find(peer_id);
     if (it != conns_.end())
@@ -307,7 +509,7 @@ void PeerManager::broadcast_have(uint32_t index) {
         queue(c, msg);
 }
 
-void PeerManager::queue(PeerConnection& c, std::vector<uint8_t> msg) {
+void PeerManager::queue(PeerConnection& c, const std::vector<uint8_t>& msg) {
     c.write_buffer.insert(c.write_buffer.end(), msg.begin(), msg.end());
 }
 
