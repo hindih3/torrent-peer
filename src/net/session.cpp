@@ -15,44 +15,56 @@ int64_t ms_since(std::chrono::steady_clock::time_point t) {
 }
 
 Session::Session(const TorrentFile& torrent, std::vector<PeerConnection> conns,
-                 const std::filesystem::path& download_dir)
+                 const std::filesystem::path& download_dir,
+                 const std::string& peer_id, uint16_t listen_port)
     : torrent_(torrent),
       disk_(torrent, download_dir),
       pieces_(torrent),
-      peers_(std::move(conns)) {}
+      peers_(std::move(conns), torrent, peer_id, listen_port) {}
+
+// Everything a peer needs on arrival, whether we dialed them or they dialed us.
+void Session::greet(uint32_t id) {
+    peers_.send_bitfield(id, pieces_.have_bitfield());
+    peers_.send_unchoke(id);
+    if (!pieces_.is_complete())
+        peers_.send_interested(id);
+}
 
 void Session::run() {
-    peers_.send_interested_all();
+    for (auto& [id, c] : peers_.connections())
+        greet(id);
 
     const auto started = std::chrono::steady_clock::now();
     auto last_report   = started;
 
-    uint64_t bytes_since = 0;
-    uint64_t bytes_total = 0;
-
-    // Single writer for the status line, so the final render can't drift out of
-    // sync with the periodic one.
-    auto report = [&](double mib_per_s) {
-        const double pct = pieces_.total()
-            ? 100.0 * pieces_.completed() / pieces_.total()
-            : 0.0;
-
-        std::cerr << '\r'
-                  << pieces_.completed() << '/' << pieces_.total()
-                  << " pieces (" << std::fixed << std::setprecision(1) << pct << "%)  "
-                  << peers_.peer_count() << " peers  "
-                  << std::setprecision(2) << mib_per_s << " MiB/s"
-                  << "\033[K" << std::flush;   // erase leftovers from a longer previous line
-    };
+    uint64_t down_since = 0;   // bytes downloaded since the last status line
+    uint64_t up_since   = 0;   // bytes uploaded since the last status line
 
     while (!pieces_.is_complete() && !peers_.empty()) {
         for (auto& ev : peers_.poll_once(1000)) {
             if (ev.type == PeerEvent::Piece) {
-                bytes_since += ev.block.data.size();
-                bytes_total += ev.block.data.size();
+                down_since += ev.block.data.size();
                 if (auto done = pieces_.on_block(ev.block)) {
                     disk_.write_piece(*done);
                     peers_.broadcast_have(done->index);
+                }
+            }
+
+            else if (ev.type == PeerEvent::Joined) {
+                greet(ev.peer_id);
+            }
+
+            else if (ev.type == PeerEvent::Request) {
+                std::cerr << "REQUEST from " << ev.peer_id << " for piece "
+                    << ev.req.piece_index << "\n";
+                if (!pieces_.have_piece(ev.req.piece_index)) continue;
+                try {
+                    auto data = disk_.read_block(ev.req.piece_index, ev.req.offset,
+                                                 ev.req.length);
+                    peers_.send_piece(ev.peer_id, ev.req.piece_index, ev.req.offset, data);
+                    up_since += data.size();
+                } catch (const std::exception&) {
+                    // malformed request (bad offset/length) — ignore, don't crash
                 }
             }
         }
@@ -62,35 +74,38 @@ void Session::run() {
         // Keep every unchoked peer's pipe full instead of one block per round
         // trip: at 50ms RTT a depth of 1 caps a peer at ~320 KiB/s no matter
         // how much bandwidth is available.
+        const auto& availability = peers_.get_piece_frequency();
         for (auto& [id, c] : peers_.connections()) {
             if (c.peer_choking) continue;
             while (c.outstanding < kPipelineDepth) {
-                auto req = pieces_.pick_block(c.has_pieces);
-                if (!req) break;  // this peer has nothing we still need
+                auto req = pieces_.pick_block(c.has_pieces, availability);
+                if (!req) break;
                 peers_.send_request(id, *req);
             }
         }
 
         const int64_t elapsed = ms_since(last_report);
         if (elapsed >= 1000) {
-            report(bytes_since / (elapsed / 1000.0) / (1024.0 * 1024.0));
-            bytes_since = 0;
+            const double secs = elapsed / 1000.0;
+            const double down = down_since / secs / (1024.0 * 1024.0);
+            const double up   = up_since   / secs / (1024.0 * 1024.0);
+
+            std::cerr << pieces_.completed() << "/" << pieces_.total() << " pieces, "
+                      << peers_.peer_count() << " peers, "
+                      << std::fixed << std::setprecision(2)
+                      << down << " down / " << up << " up MiB/s\n";
+
+            down_since = 0;
+            up_since   = 0;
             last_report = std::chrono::steady_clock::now();
         }
     }
 
-    // The loop exits the instant the last piece verifies, which is almost never
-    // accurate. Render once more so the line left on screen is
-    // the real end state. Close with the session average: an instantaneous rate
-    // measured over the few stray milliseconds since the last report would be
-    // meaningless
-    const int64_t total_ms = ms_since(started);
-    report(total_ms ? bytes_total / (total_ms / 1000.0) / (1024.0 * 1024.0) : 0.0);
-    std::cerr << '\n';
-
     if (pieces_.is_complete()) {
         disk_.sync();
-        std::cerr << "download complete\n";
+        std::cerr << "download complete in "
+                  << std::fixed << std::setprecision(1)
+                  << ms_since(started) / 1000.0 << " s\n";
     } else {
         std::cerr << "ran out of peers\n";
     }
