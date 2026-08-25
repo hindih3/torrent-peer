@@ -1,3 +1,4 @@
+#include <atomic>
 #include <csignal>
 #include <iostream>
 #include <fstream>
@@ -8,6 +9,9 @@
 
 #include "download/disk_manager.hpp"
 #include "net/session.hpp"
+
+static std::atomic<bool> g_shutdown{false};
+extern "C" void handle_sigint(int) { g_shutdown.store(true); }
 
 int main(int argc, char** argv) {
     if (argc < 2) {
@@ -71,7 +75,10 @@ int main(int argc, char** argv) {
 
         std::cerr << "saving to " << std::filesystem::absolute(out_dir) << "\n";
         Session session(torrent, std::move(conns), out_dir, peer_id, port);
-        session.run();
+
+        std::signal(SIGINT, handle_sigint);
+        session.run(g_shutdown);
+
         return 0;
     } catch (const std::exception& e) {
         std::cerr << "fatal: " << e.what() << "\n";
