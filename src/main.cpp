@@ -1,3 +1,4 @@
+#include <atomic>
 #include <csignal>
 #include <iostream>
 #include <fstream>
@@ -9,6 +10,9 @@
 #include "download/disk_manager.hpp"
 #include "net/session.hpp"
 
+static std::atomic<bool> g_shutdown{false};
+extern "C" void handle_sigint(int) { g_shutdown.store(true); }
+
 int main(int argc, char** argv) {
     if (argc < 2) {
         std::cerr << "usage: torrent-peer <file.torrent> [download-dir] "
@@ -16,8 +20,8 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    std::filesystem::path out_dir  = "downloads";
-    uint16_t              port     = 6881;
+    std::filesystem::path out_dir  = "/home/hamza/CLionProjects/torrent-peer/downloads";
+    uint16_t              port     = 51413;
     bool                  use_tracker = true;
     std::vector<Peer>     manual_peers;
 
@@ -59,7 +63,7 @@ int main(int argc, char** argv) {
         std::vector<Peer> peers = manual_peers;
         if (use_tracker) {
             try {
-                auto found = contact_trackers(torrent, peer_id);
+                auto found = contact_trackers(torrent, peer_id, port);
                 peers.insert(peers.end(), found.begin(), found.end());
             } catch (const std::exception& e) {
                 std::cerr << "tracker: " << e.what() << "\n";
@@ -71,7 +75,10 @@ int main(int argc, char** argv) {
 
         std::cerr << "saving to " << std::filesystem::absolute(out_dir) << "\n";
         Session session(torrent, std::move(conns), out_dir, peer_id, port);
-        session.run();
+
+        std::signal(SIGINT, handle_sigint);
+        session.run(g_shutdown);
+
         return 0;
     } catch (const std::exception& e) {
         std::cerr << "fatal: " << e.what() << "\n";

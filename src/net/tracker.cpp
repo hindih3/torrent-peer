@@ -102,7 +102,8 @@ std::vector<TrackerSession> connect_trackers(const std::vector<TrackerCandidate>
 
 std::vector<uint8_t> build_announce_request(const TrackerSession& session,
                                              const TorrentFile& torrent,
-                                             const std::string& peer_id) {
+                                             const std::string& peer_id,
+                                             const uint16_t my_port) {
     if (peer_id.size() != 20)
         throw std::runtime_error("peer_id must be exactly 20 bytes");
 
@@ -118,7 +119,7 @@ std::vector<uint8_t> build_announce_request(const TrackerSession& session,
     uint32_t ip         = 0;
     uint32_t key        = htonl(rand());
     int32_t  num_want   = htonl(-1);
-    uint16_t port       = htons(6881);
+    uint16_t port       = htons(my_port);
 
     memcpy(announce_request.data(),      &conn_id,    8);
     memcpy(announce_request.data() + 8,  &action,     4);
@@ -156,11 +157,12 @@ std::vector<Peer> parse_peers(const uint8_t* response, ssize_t n) {
 
 std::vector<Peer> announce(const std::vector<TrackerSession>& sessions,
                            const TorrentFile& torrent,
-                           const std::string& peer_id) {
+                           const std::string& peer_id,
+                           const uint16_t port) {
     std::unordered_map<std::string, Peer> peers;
 
     for (const auto& session : sessions) {
-        auto packet = build_announce_request(session, torrent, peer_id);
+        auto packet = build_announce_request(session, torrent, peer_id, port);
         send(session.sockfd, packet.data(), packet.size(), 0);
     }
 
@@ -241,7 +243,8 @@ TrackerCandidate create_connected_socket(const std::string& url) {
 }
 
 std::vector<Peer> contact_trackers(const TorrentFile& torrent,
-                                   const std::string& peer_id) {
+                                   const std::string& peer_id,
+                                   const uint16_t port) {
     if (peer_id.size() != 20)
         throw std::runtime_error("peer_id must be exactly 20 bytes");
 
@@ -280,7 +283,7 @@ std::vector<Peer> contact_trackers(const TorrentFile& torrent,
 
         std::cerr << sessions.size() << " tracker(s) responded to connect\n";
 
-        std::vector<Peer> peers = announce(sessions, torrent, peer_id);
+        std::vector<Peer> peers = announce(sessions, torrent, peer_id, port);
 
         for (const auto& s : sessions)
             close(s.sockfd);

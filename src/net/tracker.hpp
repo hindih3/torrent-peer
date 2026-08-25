@@ -31,7 +31,8 @@ std::vector<TrackerSession> connect_trackers(const std::vector<TrackerCandidate>
 
 std::vector<uint8_t> build_announce_request(const TrackerSession& session,
                                              const TorrentFile& torrent,
-                                             const std::string& peer_id);
+                                             const std::string& peer_id,
+                                             uint16_t my_port);
 std::vector<Peer> parse_peers(const uint8_t* response, ssize_t n);
 
 std::vector<Peer>  announce(const std::vector<TrackerSession>& sessions,
@@ -41,4 +42,5 @@ std::vector<Peer>  announce(const std::vector<TrackerSession>& sessions,
 TrackerCandidate create_connected_socket(const std::string& url);
 
 std::vector<Peer> contact_trackers(const TorrentFile& torrent,
-                                    const std::string& peer_id);
+                                    const std::string& peer_id,
+                                    uint16_t port);
