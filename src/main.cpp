@@ -3,11 +3,7 @@
 #include <iostream>
 #include <fstream>
 #include <sstream>
-#include <ctime>
-#include <unistd.h>
-#include <sys/poll.h>
 
-#include "download/disk_manager.hpp"
 #include "net/session.hpp"
 
 static std::atomic<bool> g_shutdown{false};

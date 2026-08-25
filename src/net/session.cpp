@@ -25,7 +25,12 @@ Session::Session(const TorrentFile& torrent, std::vector<PeerConnection> conns,
 
 // Everything a peer needs on arrival, whether we dialed them or they dialed us.
 void Session::greet(uint32_t id) {
-    peers_.send_bitfield(id, pieces_.have_bitfield());
+    //DEBUG
+    auto bf = pieces_.have_bitfield();
+    std::cerr << "greet peer " << id << " — ";
+    bf.print();
+
+    peers_.send_bitfield(id, bf);
     peers_.send_unchoke(id);
     if (!pieces_.is_complete())
         peers_.send_interested(id);

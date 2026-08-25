@@ -5,6 +5,7 @@
 #include <cerrno>
 #include <system_error>
 #include <cstring>
+#include <iostream>
 
 constexpr uint32_t BLOCK_SIZE = 16384;
 
@@ -76,6 +77,20 @@ public:
     void set(uint32_t i) {
         if (i >= bits_) throw std::out_of_range("bitfield index");
         bytes_[i / 8] |= static_cast<uint8_t>(1u << (7 - i % 8));
+    }
+
+    void print(std::ostream& os = std::cerr) const {
+        uint32_t have = 0;
+        for (uint32_t i = 0; i < bits_; ++i)
+            if (get(i)) ++have;
+        os << "bitfield: " << have << "/" << bits_ << " set, "
+           << bytes_.size() << " bytes [";
+        for (uint8_t b : bytes_) {
+            char buf[4];
+            std::snprintf(buf, sizeof(buf), "%02x", b);
+            os << buf;
+        }
+        os << "]\n";
     }
 
     uint32_t size() const { return bits_; }
