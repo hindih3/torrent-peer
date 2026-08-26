@@ -74,7 +74,7 @@ void Session::run(const std::atomic<bool>& shutdown) {
                     peers_.send_piece(ev.peer_id, ev.req.piece_index, ev.req.offset, data);
                     up_since += data.size();
                 } catch (const std::exception& e) {
-                    // malformed request (bad offset/length) — ignore, don't crash
+                    // malformed request (bad offset/length), ignore, don't crash
                     log(LogLevel::Debug, "peer {} bad request piece {} off {} len {}: {}",
                         ev.peer_id, ev.req.piece_index, ev.req.offset, ev.req.length, e.what());
                 }
@@ -85,7 +85,7 @@ void Session::run(const std::atomic<bool>& shutdown) {
 
         if (pieces_.is_complete() && !announced_complete) {
             disk_.sync();
-            log(LogLevel::Info, "download complete in {:.1f} s — seeding",
+            log(LogLevel::Info, "download complete in {:.1f} | seeding",
                 ms_since(started) / 1000.0);
             announced_complete = true;
         }

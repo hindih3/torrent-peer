@@ -460,7 +460,7 @@ void PeerManager::handle_message(uint32_t peer_id, const std::vector<uint8_t>& m
         default:
             log(LogLevel::Trace, "peer {} <- unknown msg id {} ({} byte payload)",
                 peer_id, id, payload_len);
-            break;   // request/cancel/unknown — ignored in naive version
+            break;   // request/cancel/unknown
     }
 }
 

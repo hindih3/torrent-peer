@@ -34,40 +34,30 @@ URL list:
   https://webtorrent.io/torrents/
 Info hash: dd8255ecdc7ca55fb0bbf81323d87062db1f6d1c
 Total length: 276445467
-failed: udp://tracker.leechers-paradise.org:6969 : DNS resolution failed: tracker.leechers-paradise.org
-tier empty, skipping
-connected: udp://tracker.coppersurfer.tk:6969
-no connect responses from tier
-connected: udp://tracker.opentrackr.org:1337
-no connect responses from tier
 connected: udp://explodie.org:6969
 1 tracker(s) responded to connect
 udp://explodie.org:6969: 50 peers
 TCP connected: 24.171.8.210:491XX
-TCP connected: 72.28.134.42:514XX
-...
-TCP connected: 119.17.145.206:607XX
 handshake ok: 24.171.8.210:491XX
-handshake ok: 89.149.197.83:56XX
-handshake ok: 82.64.77.142:545XX
 ...
-handshake ok: 79.112.5.13:636XX
 saving to "CLionProjects/torrent-peer/downloads"
-1055/1055 pieces (100.0%)  16 peers  3.94 MiB/s
-download complete
+1055/1055 pieces, 16 peers, 3.94 down / 0.00 up MiB/s
+download complete in 50.5 s — seeding
 ```
 
 ## Status
 
-Downloads work end to end. The flow is roughly:
+Downloads and seeding both work. The flow kind of looks like:
 parse and extract torrent metadata → connect to trackers → extract peers → peer TCP connect/handshake
-→ send pipelined block requests → SHA-1 verification → disk.
-
-It does not seed yet, it's purely a leeching client for now.
+→ send pipelined block requests → SHA-1 verification → disk. Once every piece is
+verified the client keeps running as a seed, accepting inbound peers and serving
+`request` messages, until interrupted with Ctrl+C.
 
 ## Building
 
-Requires CMake 3.16+, a C++17 compiler, and OpenSSL development headers.
+Requires CMake 3.16+, a C++20 compiler, and OpenSSL development headers. The code can compile with a C++17
+compiler with the removal/replacement of some secondary features like designated initializers 
+and `std::format`.
 
 ```sh
 # Debian/Ubuntu
@@ -85,10 +75,28 @@ environment and passed testing normally.
 ## Usage
 
 ```sh
-./build/torrent-peer <file.torrent> [download-dir]
+./build/torrent-peer <file.torrent> [download-dir] [options]
 ```
 
 `download-dir` defaults to `./downloads`.
+
+| Option | Description |
+| --- | --- |
+| `--port N` | Port to listen on for inbound peers (also advertised to trackers). Default 51413. |
+| `--peer host:port` | Add a peer manually. May be repeated. Combines with tracker-discovered peers. |
+| `--no-tracker` | Skip tracker contact and use only `--peer` addresses. |
+| `--log-level LEVEL` | `trace`, `debug`, `info` (default), `warn`, `error`, or `off`. |
+
+The log level can also be set with the `TP_LOG` environment variable; an explicit
+`--log-level` flag overrides it. `trace` prints every wire message in both
+directions and is very high volume; heavily recommend redirecting it to a file:
+
+```sh
+./build/torrent-peer file.torrent --log-level trace 2> trace.log
+```
+
+Seeding outside my LAN barely got me any peers until I set up port forwarding on my router.
+I went from 2 connections to 12 with this fix. Try this fix if your upload rate feels lackluster.
 
 ## How it works
 
@@ -118,8 +126,8 @@ environment and passed testing normally.
      ▼
 ┌─────────────┐   net/         Event loop. Polls peers, hands arriving blocks to
 │   Session   │   session.cpp  the piece manager, writes verified pieces to disk,
-└─────────────┘                and refills each peer's request pipeline.
-     │
+└─────────────┘                serves requests from peers, and refills each
+     │                         peer's request pipeline.
      ├──────────────┬──────────────────┐
      ▼              ▼                  ▼
 ┌───────────┐ ┌────────────┐  ┌──────────────┐
@@ -127,7 +135,10 @@ environment and passed testing normally.
 └───────────┘ └────────────┘  └──────────────┘
  socket I/O,   block choice,   file layout,
  message       assembly,       slice-based
- framing       SHA-1 verify    writes
+ framing,      SHA-1 verify    reads & writes
+ inbound
+ accept
+
 ```
 
 ### Design notes
@@ -136,45 +147,65 @@ environment and passed testing normally.
 starts and ends in the input so the SHA-1 is computed over the exact bytes
 received rather than a re-encoding.
 
+**Inbound connections.** The client both dials peers and accepts inbound
+connections on its listen port. An inbound peer speaks the handshake first
+(the mirror of the outbound path).
+
 **Request pipelining.** Each unchoked peer is kept at 8 outstanding block
 requests. With one request in flight per round trip, a peer at 50 ms RTT caps
 out around 320 KiB/s regardless of available bandwidth.
 
-**Slice-based disk writes.** The torrent is treated as one contiguous byte
+**Slice-based disk I/O.** The torrent is treated as one contiguous byte
 range mapped onto a list of files. A piece that sits between a file boundary is
 split at the boundary and written with `pwrite` to each file at the right
-offset, so pieces can arrive and be written in any order.
+offset, so pieces can arrive and be written in any order. Serving a `request`
+reads back through the same mapping.
 
-**Space is reserved up front.** preallocate with posix_fallocate; on filesystems 
-that don't support it, fall back to ftruncate and accept a sparse file. `ftruncate` 
-produces a sparse file, which means a full disk surfaces as a write failure hours into 
+**Space is reserved up front.** preallocate with posix_fallocate; on filesystems
+that don't support it, fall back to ftruncate and accept a sparse file. `ftruncate`
+produces a sparse file, which means a full disk surfaces as a write failure hours into
 a download instead of immediately.
 
 **Untrusted input is flagged.** File paths from the torrent are
-rejected if they contain `..` or path separators to stop path traversal attacks (so 
-a malicious torrent can't write outside the download directory). Peer bitfields 
-are rejected if the length is wrong or spare bits are set, and message lengths 
+rejected if they contain `..` or path separators to stop path traversal attacks (so
+a malicious torrent can't write outside the download directory). Peer bitfields
+are rejected if the length is wrong or spare bits are set, and message lengths
 above 1 MiB are refused before any allocation.
 
 **Stalled requests are recycled.** Blocks requested but not delivered within
 30 seconds return to the pool so one slow peer can't hold a piece hostage.
 
+**Leveled logging.** A small `std::format`-based logger gates output by level
+(`trace`..`error`). Connection lifecycle is logged at `debug`; every wire
+message in and out is logged at `trace`, with `->`/`<-` marking direction.
+Default `info` keeps normal runs quiet.
+
 ## Roadmap
 
-- [x] **Rarest-first piece selection.** Implemented rarest-first algorithm which uses a frequency
-  array to decide which piece to request next from each peer. Benefits swarm health.
-- [ ] **Seeding.** `DiskManager::read_block` is already implemented for this;
-  the peer wire handling for `request` and `cancel` is not.
-- [ ] **Choking algorithm.** No tit-for-tat; every peer is sent `interested`
-  and none are choked.
+- [x] **Rarest-first piece selection.** Uses a frequency array to decide which
+  piece to request next from each peer. Benefits swarm health.
+- [x] **Seeding.** Serves `request` messages and continues seeding after the
+  download completes. (`cancel` is still ignored — a served block that the peer
+  no longer wants is sent anyway.)
+- [ ] **Choking algorithm.** No tit-for-tat; every peer is unchoked and none
+  are choked. A real choke algorithm would attract more upload demand in busy
+  swarms.
+- [ ] **Tracker re-announce.** The client announces once at startup and never
+  refreshes, so it does not discover peers that join later and is not kept in
+  the tracker's seed list.
+- [ ] **Sequential piece selection.** Optional lowest-index-first mode for
+  streaming media while it downloads. Off by default: it trades swarm efficiency
+  for in-order availability, so it would be an explicit `--sequential` opt-in
+  rather than the default rarest-first.
 - [ ] **HTTP tracker support.** Only UDP trackers (BEP 15) are supported;
   `http://` and `https://` announce URLs are ignored.
 - [ ] **IPv6.** Peer connections and tracker communication are IPv4 only.
 
-## Known limitations
+## Limitations
 
 One torrent per process. IPv4 only. No encryption, no PEX, no
-fast-extension support.
+fast-extension support. No `cancel` handling. Tracker announce is one-shot
+(no re-announce), so long seeding sessions stop attracting new peers.
 
 ## References
 
