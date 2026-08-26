@@ -25,10 +25,9 @@ Session::Session(const TorrentFile& torrent, std::vector<PeerConnection> conns,
 
 // Everything a peer needs on arrival, whether we dialed them or they dialed us.
 void Session::greet(uint32_t id) {
-    //DEBUG
     auto bf = pieces_.have_bitfield();
-    std::cerr << "greet peer " << id << " — ";
-    bf.print();
+    log(LogLevel::Debug, "greet peer {} ({}/{} pieces)",
+        id, pieces_.completed(), pieces_.total());
 
     peers_.send_bitfield(id, bf);
     peers_.send_unchoke(id);
@@ -53,24 +52,31 @@ void Session::run(const std::atomic<bool>& shutdown) {
                 if (auto done = pieces_.on_block(ev.block)) {
                     disk_.write_piece(*done);
                     peers_.broadcast_have(done->index);
+                    log(LogLevel::Debug, "piece {} complete & verified ({}/{})",
+                        done->index, pieces_.completed(), pieces_.total());
                 }
             }
 
             else if (ev.type == PeerEvent::Joined) {
+                log(LogLevel::Debug, "peer {} joined", ev.peer_id);
                 greet(ev.peer_id);
             }
 
             else if (ev.type == PeerEvent::Request) {
-                std::cerr << "REQUEST from " << ev.peer_id << " for piece "
-                    << ev.req.piece_index << "\n";
-                if (!pieces_.have_piece(ev.req.piece_index)) continue;
+                if (!pieces_.have_piece(ev.req.piece_index)) {
+                    log(LogLevel::Debug, "peer {} requested piece {} we don't have; ignoring",
+                        ev.peer_id, ev.req.piece_index);
+                    continue;
+                }
                 try {
                     auto data = disk_.read_block(ev.req.piece_index, ev.req.offset,
                                                  ev.req.length);
                     peers_.send_piece(ev.peer_id, ev.req.piece_index, ev.req.offset, data);
                     up_since += data.size();
-                } catch (const std::exception&) {
+                } catch (const std::exception& e) {
                     // malformed request (bad offset/length) — ignore, don't crash
+                    log(LogLevel::Debug, "peer {} bad request piece {} off {} len {}: {}",
+                        ev.peer_id, ev.req.piece_index, ev.req.offset, ev.req.length, e.what());
                 }
             }
         }
@@ -79,9 +85,8 @@ void Session::run(const std::atomic<bool>& shutdown) {
 
         if (pieces_.is_complete() && !announced_complete) {
             disk_.sync();
-            std::cerr << "download complete in "
-                      << std::fixed << std::setprecision(1)
-                      << ms_since(started) / 1000.0 << " s — seeding\n";
+            log(LogLevel::Info, "download complete in {:.1f} s — seeding",
+                ms_since(started) / 1000.0);
             announced_complete = true;
         }
 
@@ -117,10 +122,8 @@ void Session::run(const std::atomic<bool>& shutdown) {
 
     if (pieces_.is_complete()) {
         disk_.sync();
-        std::cerr << "download complete in "
-                  << std::fixed << std::setprecision(1)
-                  << ms_since(started) / 1000.0 << " s\n";
+        log(LogLevel::Info, "download complete in {:.1f} s", ms_since(started) / 1000.0);
     } else {
-        std::cerr << "ran out of peers\n";
+        log(LogLevel::Info, "ran out of peers");
     }
 }

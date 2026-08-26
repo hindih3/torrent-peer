@@ -1,12 +1,35 @@
 #pragma once
 #include <openssl/evp.h>
+#include <format>
+#include <iostream>
 #include <array>
 #include <string>
-#include <cstdint>
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <cstring>
+#include <random>
 #include <stdexcept>
+
+enum class LogLevel { Trace, Debug, Info, Warn, Error, Off };
+inline LogLevel g_log_level = LogLevel::Info;
+
+inline const char* prefix(LogLevel l) {
+    switch (l) {
+        case LogLevel::Trace: return "[TRACE] ";
+        case LogLevel::Debug: return "[DEBUG] ";
+        case LogLevel::Info:  return "[INFO]  ";
+        case LogLevel::Warn:  return "[WARN]  ";
+        case LogLevel::Error: return "[ERROR] ";
+        default:              return "";
+    }
+}
+
+template <typename... Args>
+void log(const LogLevel level, std::format_string<Args...> fmt, Args&&... args) {
+    if (level < g_log_level) return;
+    std::cerr << prefix(level)
+              << std::format(fmt, std::forward<Args>(args)...) << '\n';
+}
 
 inline std::array<uint8_t, 20> sha1(const uint8_t* data, size_t len) {
     std::array<uint8_t, 20> hash{};
@@ -58,7 +81,6 @@ struct TrackerAddress {
 };
 
 inline TrackerAddress parse_tracker_url(const std::string& url) {
-    // udp://exodus.desync.com:6969/announce
     const std::string prefix = "udp://";
     if (url.substr(0, prefix.size()) != prefix)
         throw std::runtime_error("Only UDP trackers supported: " + url);
@@ -83,9 +105,9 @@ inline std::string generate_peer_id() {
     static constexpr char charset[] =
         "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
+    std::mt19937 rng(std::random_device{}());
     std::string id = "-HB0002-";
     for (int i = 0; i < 12; ++i)
-        id += charset[rand() % 62];
-
+        id += charset[rng() % 62];
     return id;
 }

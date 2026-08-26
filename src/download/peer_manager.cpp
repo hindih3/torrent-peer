@@ -21,13 +21,12 @@ int build_listen_fd(uint16_t port) {
     addr.sin_port        = htons(port);
 
     if (bind(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
-        std::cerr << "listen: bind " << port << " failed: " << strerror(errno)
-                  << " (inbound peers disabled)\n";
+        log(LogLevel::Warn, "listen: bind {} failed: {} (inbound peers disabled)", port, strerror(errno));
         close(fd);
         return -1;
     }
     if (listen(fd, 32) < 0) {
-        std::cerr << "listen: " << strerror(errno) << " (inbound peers disabled)\n";
+        log(LogLevel::Warn, "listen: {} (inbound peers disabled)", strerror(errno));
         close(fd);
         return -1;
     }
@@ -97,7 +96,7 @@ PeerManager::PeerManager(std::vector<PeerConnection> conns,
     }
 
     if (listen_fd_ >= 0)
-        std::cerr << "listening for inbound peers on port " << listen_port << "\n";
+        log(LogLevel::Info, "listening for inbound peers on port {}", listen_port);
 }
 
 PeerManager::~PeerManager() {
@@ -137,7 +136,7 @@ void PeerManager::accept_new() {
         p.peer    = { std::string(ip), std::to_string(ntohs(addr.sin_port)) };
         p.started = std::chrono::steady_clock::now();
 
-        std::cerr << "inbound: " << p.peer.host << ":" << p.peer.port << "\n";
+        log(LogLevel::Debug, "inbound: {}:{}", p.peer.host, p.peer.port);
         inbound_.push_back(std::move(p));
     }
 }
@@ -162,17 +161,17 @@ PeerManager::InboundResult PeerManager::advance_inbound(PendingInbound& p, std::
 
     if (p.buffer[0] != 19 ||
         std::memcmp(p.buffer.data() + 1, "BitTorrent protocol", 19) != 0) {
-        std::cerr << "inbound " << p.peer.host << ": bad protocol header\n";
+        log(LogLevel::Debug, "inbound {}: bad protocol header", p.peer.host);
         return InboundResult::Drop;
     }
     if (std::memcmp(p.buffer.data() + 28, torrent_.info_hash.data(), 20) != 0) {
-        std::cerr << "inbound " << p.peer.host << ": info hash mismatch\n";
+        log(LogLevel::Debug, "inbound {}: info hash mismatch", p.peer.host);
         return InboundResult::Drop;
     }
     // We advertise ourselves to trackers, so trackers hand our address back to
     // us; without this a client happily connects to itself.
     if (std::memcmp(p.buffer.data() + 48, peer_id_.data(), 20) == 0) {
-        std::cerr << "inbound " << p.peer.host << ": that is us, dropping\n";
+        log(LogLevel::Debug, "inbound {}: that is us, dropping", p.peer.host);
         return InboundResult::Drop;
     }
 
@@ -190,7 +189,7 @@ PeerManager::InboundResult PeerManager::advance_inbound(PendingInbound& p, std::
     conns_.emplace(id, std::move(c));
     out.push_back({.type = PeerEvent::Joined, .peer_id = id, .block = {}, .req = {}});
 
-    std::cerr << "handshake ok (inbound): " << p.peer.host << ":" << p.peer.port << "\n";
+    log(LogLevel::Debug, "handshake ok (inbound): {}:{}", p.peer.host, p.peer.port);
 
     p.sockfd = -1;   // ownership moved into conns_; caller must not close it
     return InboundResult::Promoted;
@@ -200,7 +199,7 @@ void PeerManager::expire_inbound(std::chrono::seconds timeout) {
     const auto cutoff = std::chrono::steady_clock::now() - timeout;
     for (auto it = inbound_.begin(); it != inbound_.end(); ) {
         if (it->started < cutoff) {
-            std::cerr << "inbound " << it->peer.host << ": handshake timed out\n";
+            log(LogLevel::Debug, "inbound {}: handshake timed out", it->peer.host);
             if (it->sockfd >= 0) close(it->sockfd);
             it = inbound_.erase(it);
         } else {
@@ -333,7 +332,7 @@ std::vector<PeerEvent> PeerManager::poll_once(int timeout_ms) {
             while (extract_message(c.read_buffer, msg))
                 handle_message(id, msg, events);
         } catch (const std::exception& e) {
-            std::cerr << "protocol error from " << c.peer.host << ": " << e.what() << "\n";
+            log(LogLevel::Warn, "protocol error from {}: {}", c.peer.host, e.what());
             to_drop.push_back(id);
         }
     }
@@ -366,20 +365,24 @@ void PeerManager::handle_message(uint32_t peer_id, const std::vector<uint8_t>& m
 
     switch (id) {
         case MSG_CHOKE:
+            log(LogLevel::Trace, "peer {} <- choke", peer_id);
             c.peer_choking = true;
             c.outstanding  = 0;
             break;
 
         case MSG_UNCHOKE:
+            log(LogLevel::Trace, "peer {} <- unchoke", peer_id);
             c.peer_choking = false;
             out.push_back({PeerEvent::Unchoke, peer_id, {}, {}});
             break;
 
         case MSG_INTERESTED:
+            log(LogLevel::Trace, "peer {} <- interested", peer_id);
             c.peer_interested = true;
             break;
 
         case MSG_NOT_INTERESTED:
+            log(LogLevel::Trace, "peer {} <- not_interested", peer_id);
             c.peer_interested = false;
             break;
 
@@ -389,6 +392,7 @@ void PeerManager::handle_message(uint32_t peer_id, const std::vector<uint8_t>& m
             std::memcpy(&index, payload, 4);
             index = ntohl(index);
             if (index >= c.has_pieces.size()) throw std::runtime_error("have out of range");
+            log(LogLevel::Trace, "peer {} <- have piece {}", peer_id, index);
             c.has_pieces.set(index);
             ++piece_frequency_[index];
             break;
@@ -401,12 +405,16 @@ void PeerManager::handle_message(uint32_t peer_id, const std::vector<uint8_t>& m
             std::vector<uint8_t> raw(payload, payload + payload_len);
             c.has_pieces = Bitfield::from_bytes(raw, c.has_pieces.size());
 
+            log(LogLevel::Trace, "peer {} <- bitfield ({} bytes)", peer_id, payload_len);
             apply_availability(c.has_pieces, +1);
             break;
         }
 
         case MSG_REQUEST: {
-            if (c.am_choking) break;
+            if (c.am_choking) {
+                log(LogLevel::Trace, "peer {} <- request while choked; ignoring", peer_id);
+                break;
+            }
             if (payload_len != 12) throw std::runtime_error("bad request");
             uint32_t index, begin, length;
             std::memcpy(&index,  payload,     4);
@@ -416,6 +424,8 @@ void PeerManager::handle_message(uint32_t peer_id, const std::vector<uint8_t>& m
 
             if (length > BLOCK_SIZE) throw std::runtime_error("request too large");
 
+            log(LogLevel::Trace, "peer {} <- request piece {} off {} len {}",
+                peer_id, index, begin, length);
             out.push_back({PeerEvent::Request, peer_id, {}, {index, begin, length}});
             break;
         }
@@ -433,12 +443,16 @@ void PeerManager::handle_message(uint32_t peer_id, const std::vector<uint8_t>& m
             block.offset      = begin;
             block.data.assign(payload + 8, payload + payload_len);
 
+            log(LogLevel::Trace, "peer {} <- piece {} off {} ({} bytes)",
+                peer_id, index, begin, block.data.size());
             if (c.outstanding > 0) --c.outstanding;
             out.push_back({PeerEvent::Piece, peer_id, std::move(block)});
             break;
         }
 
         default:
+            log(LogLevel::Trace, "peer {} <- unknown msg id {} ({} byte payload)",
+                peer_id, id, payload_len);
             break;   // request/cancel/unknown — ignored in naive version
     }
 }
