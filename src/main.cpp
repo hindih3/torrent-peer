@@ -12,7 +12,8 @@ extern "C" void handle_sigint(int) { g_shutdown.store(true); }
 int main(int argc, char** argv) {
     if (argc < 2) {
         std::cerr << "usage: torrent-peer <file.torrent> [download-dir] "
-                     "[--port N] [--peer host:port] [--no-tracker]\n";
+                     "[--port N] [--peer host:port] [--no-tracker] "
+                     "[--log-level trace|debug|info|warn|error|off]\n";
         return 1;
     }
 
@@ -20,6 +21,15 @@ int main(int argc, char** argv) {
     uint16_t              port     = 51413;
     bool                  use_tracker = true;
     std::vector<Peer>     manual_peers;
+
+    if (const char* env = std::getenv("TP_LOG")) {
+        std::string_view v{env};
+        if      (v == "trace") g_log_level = LogLevel::Trace;
+        else if (v == "debug") g_log_level = LogLevel::Debug;
+        else if (v == "info")  g_log_level = LogLevel::Info;
+        else if (v == "warn")  g_log_level = LogLevel::Warn;
+        else if (v == "error") g_log_level = LogLevel::Error;
+    }
 
     for (int i = 2; i < argc; ++i) {
         std::string a = argv[i];
@@ -32,6 +42,15 @@ int main(int argc, char** argv) {
             manual_peers.push_back({hp.substr(0, colon), hp.substr(colon + 1)});
         } else if (a == "--no-tracker") {
             use_tracker = false;
+        } else if (a == "--log-level" && i + 1 < argc) {
+            std::string lvl = argv[++i];
+            if      (lvl == "trace") g_log_level = LogLevel::Trace;
+            else if (lvl == "debug") g_log_level = LogLevel::Debug;
+            else if (lvl == "info")  g_log_level = LogLevel::Info;
+            else if (lvl == "warn")  g_log_level = LogLevel::Warn;
+            else if (lvl == "error") g_log_level = LogLevel::Error;
+            else if (lvl == "off")   g_log_level = LogLevel::Off;
+            else { std::cerr << "unknown log level: " << lvl << "\n"; return 1; }
         } else if (!a.empty() && a[0] != '-') {
             out_dir = a;
         } else {

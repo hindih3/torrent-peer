@@ -304,6 +304,8 @@ std::vector<PeerEvent> PeerManager::poll_once(int timeout_ms) {
                                c.write_buffer.size(), MSG_NOSIGNAL);
             if (w < 0) {
                 if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
+                    log(LogLevel::Debug, "peer {} dropped: send failed: {}",
+                        id, strerror(errno));
                     to_drop.push_back(id);
                     continue;  // socket is gone; don't try to read from it
                 }
@@ -320,10 +322,15 @@ std::vector<PeerEvent> PeerManager::poll_once(int timeout_ms) {
 
         if (n < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) continue;
+            log(LogLevel::Debug, "peer {} dropped: recv failed: {}", id, strerror(errno));
             to_drop.push_back(id);
             continue;
         }
-        if (n == 0) { to_drop.push_back(id); continue; }
+        if (n == 0) {
+            log(LogLevel::Debug, "peer {} dropped: connection closed", id);
+            to_drop.push_back(id);
+            continue;
+        }
 
         c.read_buffer.insert(c.read_buffer.end(), chunk, chunk + n);
 
@@ -399,7 +406,7 @@ void PeerManager::handle_message(uint32_t peer_id, const std::vector<uint8_t>& m
         }
 
         case MSG_BITFIELD: {
-            if (c.got_bitfield) throw std::runtime_error("duplicate bitfield");
+            if (c.got_bitfield) break; // throwing and dropping the peer would be too harsh IMO
             c.got_bitfield = true;
 
             std::vector<uint8_t> raw(payload, payload + payload_len);
@@ -486,6 +493,7 @@ void PeerManager::send_to(uint32_t peer_id, const std::vector<uint8_t>& msg) {
 }
 
 void PeerManager::send_bitfield(uint32_t peer_id, const Bitfield& our_have) {
+    log(LogLevel::Trace, "peer {} -> bitfield ({} bytes)", peer_id, our_have.bytes().size());
     send_to(peer_id, build_message(MSG_BITFIELD, our_have.bytes()));
 }
 
@@ -496,6 +504,8 @@ void PeerManager::send_piece(uint32_t peer_id, uint32_t index,
     std::memcpy(payload.data(),     &i, 4);
     std::memcpy(payload.data() + 4, &b, 4);
     std::memcpy(payload.data() + 8, data.data(), data.size());
+    log(LogLevel::Trace, "peer {} -> piece {} off {} ({} bytes)",
+        peer_id, index, begin, data.size());
     send_to(peer_id, build_message(MSG_PIECE, payload));
 }
 
@@ -503,6 +513,7 @@ void PeerManager::send_unchoke(uint32_t peer_id) {
     auto it = conns_.find(peer_id);
     if (it == conns_.end()) return;
     it->second.am_choking = false;
+    log(LogLevel::Trace, "peer {} -> unchoke", peer_id);
     send_to(peer_id, build_message(MSG_UNCHOKE));
 }
 
@@ -510,6 +521,8 @@ void PeerManager::send_request(uint32_t peer_id, const BlockRequest& req) {
     auto it = conns_.find(peer_id);
     if (it == conns_.end()) return;
     ++it->second.outstanding;
+    log(LogLevel::Trace, "peer {} -> request piece {} off {} len {}",
+        peer_id, req.piece_index, req.offset, req.length);
     send_to(peer_id, build_request(req));
 }
 

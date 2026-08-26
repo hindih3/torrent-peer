@@ -2,6 +2,7 @@
 #include <openssl/evp.h>
 #include <format>
 #include <iostream>
+#include <string_view>
 #include <array>
 #include <string>
 #include <sys/socket.h>
@@ -25,10 +26,23 @@ inline const char* prefix(LogLevel l) {
 }
 
 template <typename... Args>
-void log(const LogLevel level, std::format_string<Args...> fmt, Args&&... args) {
+void log(LogLevel level, std::format_string<Args...> fmt, Args&&... args) {
     if (level < g_log_level) return;
     std::cerr << prefix(level)
               << std::format(fmt, std::forward<Args>(args)...) << '\n';
+}
+
+// Parse a level name into g_log_level. Returns false on an unknown name so
+// the caller can report a usage error.
+inline bool set_log_level(const std::string_view s) {
+    if      (s == "trace") g_log_level = LogLevel::Trace;
+    else if (s == "debug") g_log_level = LogLevel::Debug;
+    else if (s == "info")  g_log_level = LogLevel::Info;
+    else if (s == "warn")  g_log_level = LogLevel::Warn;
+    else if (s == "error") g_log_level = LogLevel::Error;
+    else if (s == "off")   g_log_level = LogLevel::Off;
+    else return false;
+    return true;
 }
 
 inline std::array<uint8_t, 20> sha1(const uint8_t* data, size_t len) {
@@ -102,9 +116,7 @@ inline TrackerAddress parse_tracker_url(const std::string& url) {
 }
 
 inline std::string generate_peer_id() {
-    static constexpr char charset[] =
-        "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-
+    static constexpr char charset[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
     std::mt19937 rng(std::random_device{}());
     std::string id = "-HB0002-";
     for (int i = 0; i < 12; ++i)
