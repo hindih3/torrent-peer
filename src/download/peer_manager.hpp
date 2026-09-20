@@ -51,8 +51,6 @@ public:
     std::vector<pollfd> build_fds();
     std::vector<PeerEvent> handle_events(std::span<pollfd> pfds);
 
-    std::vector<PeerEvent> poll_once(int timeout_ms);
-
     void send_interested_all();
     void send_interested(uint32_t peer_id);
     void send_to(uint32_t peer_id, const std::vector<uint8_t>& msg);
