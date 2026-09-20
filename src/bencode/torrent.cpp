@@ -55,6 +55,8 @@ TorrentFile parse_torrent(const std::string& data) {
             torrent.announce_list.push_back(std::move(t));
         }
     }
+    if (torrent.announce_list.empty() && !torrent.announce.empty())
+        torrent.announce_list.push_back({ torrent.announce });
 
     if (auto it = dict.find("url-list"); it != dict.end())
         for (const auto& url : it->second.get_list())
