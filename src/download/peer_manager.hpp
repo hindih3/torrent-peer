@@ -3,9 +3,12 @@
 #include "common.hpp"
 #include <chrono>
 #include <cstdint>
+#include <iosfwd>
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <vector>
+#include <sys/poll.h>
 
 struct PeerEvent {
     enum Type { Unchoke, Piece, Dropped, Request, Joined } type;
@@ -44,6 +47,9 @@ public:
 
     PeerManager(const PeerManager&)            = delete;
     PeerManager& operator=(const PeerManager&) = delete;
+
+    std::vector<pollfd> build_fds();
+    std::vector<PeerEvent> handle_events(std::span<pollfd> pfds);
 
     std::vector<PeerEvent> poll_once(int timeout_ms);
 
@@ -85,6 +91,11 @@ private:
     size_t             max_peers_;
 
     std::vector<uint16_t> piece_frequency_;
+
+    std::vector<uint32_t> ids_;
+    size_t inbound_at_ = 0;
+    size_t conns_at_   = 0;
+    bool   listening_  = false;
 
     void          accept_new();
     InboundResult advance_inbound(PendingInbound& p, std::vector<PeerEvent>& out);

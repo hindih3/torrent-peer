@@ -208,26 +208,20 @@ void PeerManager::expire_inbound(std::chrono::seconds timeout) {
     }
 }
 
-std::vector<PeerEvent> PeerManager::poll_once(int timeout_ms) {
-    std::vector<PeerEvent> events;
-
-    // The fd set is three sections laid out back to back, so a single poll()
-    // covers the listener, half-open inbound sockets, and live peers:
-    //   [0]                          listen_fd_        (if bound)
-    //   [inbound_at, conns_at)       inbound_          (handshake in progress)
-    //   [conns_at, end)              conns_            (peer wire protocol)
+std::vector<pollfd> PeerManager::build_fds() {
     std::vector<pollfd> pfds;
 
     const bool listening = listen_fd_ >= 0;
-    if (listening) pfds.push_back({listen_fd_, POLLIN, 0});
+    if (listening) pfds.push_back({.fd = listen_fd_, .events = POLLIN, .revents = 0});
 
-    const size_t inbound_at = pfds.size();
+    inbound_at_ = pfds.size();
     for (const auto& p : inbound_)
         pfds.push_back({.fd = p.sockfd, .events = POLLIN, .revents = 0});
 
-    const size_t conns_at = pfds.size();
-    std::vector<uint32_t> ids;
-    ids.reserve(conns_.size());
+    conns_at_ = pfds.size();
+    // refresh stale id list
+    ids_.clear();
+    ids_.reserve(conns_.size());
     for (auto& [id, c] : conns_) {
         // Only ask for POLLOUT when there is something queued. A healthy socket
         // is almost always writable, so requesting it unconditionally makes
@@ -235,21 +229,17 @@ std::vector<PeerEvent> PeerManager::poll_once(int timeout_ms) {
         short events_mask = POLLIN;
         if (!c.write_buffer.empty()) events_mask |= POLLOUT;
         pfds.push_back({.fd = c.sockfd, .events = events_mask, .revents = 0});
-        ids.push_back(id);
+        ids_.push_back(id);
     }
+    return pfds;
+}
 
-    if (pfds.empty()) return events;
+std::vector<PeerEvent> PeerManager::handle_events(std::span<pollfd> pfds) {
+    std::vector<PeerEvent> events;
 
-    int ready = poll(pfds.data(), pfds.size(), timeout_ms);
-    if (ready < 0) {
-        if (errno == EINTR) return events;
-        throw_errno("poll");
-    }
-
-    // Even on a timeout, sweep handshakes that have gone quiet.
+    // Sweep handshakes that have gone quiet.
     expire_inbound(std::chrono::seconds(15));
-    if (ready == 0) return events;
-
+    const bool listening = listen_fd_ >= 0;
     // 1. new connections
     if (listening && (pfds[0].revents & POLLIN))
         accept_new();
@@ -263,7 +253,7 @@ std::vector<PeerEvent> PeerManager::poll_once(int timeout_ms) {
 
         for (size_t i = 0; i < inbound_.size(); ++i) {
             PendingInbound& p = inbound_[i];
-            const short rev = pfds[inbound_at + i].revents;
+            const short rev = pfds[inbound_at_ + i].revents;
 
             if (rev == 0) {
                 still_pending.push_back(std::move(p));
@@ -289,11 +279,11 @@ std::vector<PeerEvent> PeerManager::poll_once(int timeout_ms) {
     //    handshake reply is queued and will be flushed on the next poll.
     std::vector<uint32_t> to_drop;
 
-    for (size_t k = 0; k < ids.size(); ++k) {
-        const short rev = pfds[conns_at + k].revents;
+    for (size_t k = 0; k < ids_.size(); ++k) {
+        const short rev = pfds[conns_at_ + k].revents;
         if (rev == 0) continue;
 
-        uint32_t id = ids[k];
+        uint32_t id = ids_[k];
         auto it = conns_.find(id);
         if (it == conns_.end()) continue;
         PeerConnection& c = it->second;
@@ -356,6 +346,17 @@ std::vector<PeerEvent> PeerManager::poll_once(int timeout_ms) {
     }
 
     return events;
+}
+
+std::vector<PeerEvent> PeerManager::poll_once(int timeout_ms) {
+    auto pfds = build_fds();
+    if (pfds.empty()) return {};
+    int ready = poll(pfds.data(), pfds.size(), timeout_ms);
+    if (ready < 0) {
+        if (errno == EINTR) return {};
+        throw_errno("poll");
+    }
+    return handle_events(pfds);
 }
 
 void PeerManager::handle_message(uint32_t peer_id, const std::vector<uint8_t>& msg,
