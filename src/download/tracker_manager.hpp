@@ -5,7 +5,7 @@
 #include <vector>
 #include <array>
 #include <stdexcept>
-
+#include <random>
 
 #include "bencode/torrent.hpp"
 #include "bencode/utils.hpp"
@@ -37,7 +37,7 @@ struct TrackerSession {
     uint32_t key = 0; // TODO: seeded in future send_connect; 0 until then
 
     std::chrono::steady_clock::time_point connected_at;  // for the 60s expiry check
-    std::chrono::steady_clock::time_point next_announce;  // when Idle expires
+    std::chrono::steady_clock::time_point next_action;  // when Idle expires
     int retries = 0;
 
     uint32_t interval = 0;
@@ -62,10 +62,19 @@ private:
         const TrackerSession& t, TrackerEvent e, const std::string& peer_id,
         const std::array<uint8_t,20>& info_hash, uint16_t port, const AnnounceParams &p);
 
+    uint32_t next_random();
+
+    static void open_socket(TrackerSession &t);
+
+    static void fail_backoff(TrackerSession &t);
+
+    void send_connect(TrackerSession &tracker);
+
 
     std::vector <TrackerSession> trackers_;
     const TorrentFile& torrent_;
     std::string peer_id_;
     uint16_t listen_port_;
     uint64_t downloaded_ = 0, left_ = 0, uploaded_ = 0;
+    std::mt19937 rng_;
 };

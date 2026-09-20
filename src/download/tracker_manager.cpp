@@ -1,12 +1,17 @@
 #include "tracker_manager.hpp"
 
+#include <fcntl.h>
+#include <netdb.h>
 #include <utility>
 #include <vector>
+#include <bits/fcntl-linux.h>
+
 #include "common.hpp"
 
 TrackerManager::TrackerManager(const TorrentFile& torrent,
                                std::string  peer_id, uint16_t listen_port)
-                   : torrent_(torrent), peer_id_(std::move(peer_id)), listen_port_(listen_port)
+                   : torrent_(torrent), peer_id_(std::move(peer_id)),
+                     listen_port_(listen_port), rng_(std::random_device{}())
 {
     for (auto& tier : torrent.announce_list) {
         for (auto& url : tier) {
@@ -69,4 +74,58 @@ std::vector<uint8_t> TrackerManager::build_announce_request(
     memcpy(packet.data() + 92, &num_want,   4);
     memcpy(packet.data() + 96, &port_be,    2);
     return packet;
+}
+
+uint32_t TrackerManager::next_random() {
+    std::uniform_int_distribution<uint32_t> dist;
+    return dist(rng_);
+}
+
+void TrackerManager::open_socket(TrackerSession& t) {
+    addrinfo hints{}, *res;
+    hints.ai_family   = AF_INET;
+    hints.ai_socktype = SOCK_DGRAM;
+
+    if (getaddrinfo(t.address.host.c_str(), t.address.port.c_str(),
+                    &hints, &res) != 0)
+        throw std::runtime_error("DNS resolution failed: " + t.address.host);
+
+    int fd = createUDPIpv4Socket();
+    fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
+
+    if (connect(fd, res->ai_addr, res->ai_addrlen) == -1) {
+        freeaddrinfo(res);
+        close(fd);
+        throw std::runtime_error("connect failed: " + t.address.host);
+    }
+    freeaddrinfo(res);
+    t.sockfd = fd;
+}
+
+void TrackerManager::fail_backoff(TrackerSession& t) {
+    if (t.sockfd >= 0) { close(t.sockfd); t.sockfd = -1; }
+    t.state = TrackerState::Disconnected;
+    t.retries = std::min(t.retries + 1, 8);
+    auto delay = std::chrono::seconds(15 * (1 << t.retries)); // 15·2^n
+    t.next_action = std::chrono::steady_clock::now() + delay;
+}
+
+void TrackerManager::send_connect(TrackerSession& t) {
+    try {
+        open_socket(t);
+    } catch (const std::exception& e) {
+        log(LogLevel::Debug, "connect failed for {}: {}", t.address.host, e.what());
+        fail_backoff(t);
+        return;
+    }
+
+    t.transaction_id = next_random();
+    if (t.key == 0) t.key = next_random();
+    auto packet = build_connect_request(t.transaction_id);
+    if (::send(t.sockfd, packet.data(), packet.size(), 0) < 0) {
+        fail_backoff(t);
+        return;
+    }
+    t.state = TrackerState::Connecting;
+    t.connected_at = std::chrono::steady_clock::now();
 }
