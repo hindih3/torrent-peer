@@ -3,6 +3,7 @@
 #include <chrono>
 #include <iomanip>
 #include <iostream>
+#include <thread>
 
 namespace {
 bool announced_complete = false;
@@ -44,39 +45,46 @@ void Session::run(const std::atomic<bool>& shutdown) {
 
     uint64_t down_since = 0;   // bytes downloaded since the last status line
     uint64_t up_since   = 0;   // bytes uploaded since the last status line
-
     while (!shutdown.load() && !peers_.empty()) {
-        for (auto& ev : peers_.poll_once(1000)) {
-            if (ev.type == PeerEvent::Piece) {
-                down_since += ev.block.data.size();
-                if (auto done = pieces_.on_block(ev.block)) {
-                    disk_.write_piece(*done);
-                    peers_.broadcast_have(done->index);
-                    log(LogLevel::Debug, "piece {} complete & verified ({}/{})",
-                        done->index, pieces_.completed(), pieces_.total());
-                }
+        int timeout_ms = 1000;
+        auto pfds = peers_.build_fds();
+        if (pfds.empty()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(timeout_ms));
+        } else {
+            int ready = poll(pfds.data(), pfds.size(), timeout_ms);
+            if (ready < 0) {
+                if (errno == EINTR) continue;
+                throw_errno("poll");
             }
-
-            else if (ev.type == PeerEvent::Joined) {
-                log(LogLevel::Debug, "peer {} joined", ev.peer_id);
-                greet(ev.peer_id);
-            }
-
-            else if (ev.type == PeerEvent::Request) {
-                if (!pieces_.have_piece(ev.req.piece_index)) {
-                    log(LogLevel::Debug, "peer {} requested piece {} we don't have; ignoring",
-                        ev.peer_id, ev.req.piece_index);
-                    continue;
+            // ready >= 0: process whatever came back
+            for (auto& ev : peers_.handle_events(pfds)) {
+                if (ev.type == PeerEvent::Piece) {
+                    down_since += ev.block.data.size();
+                    if (auto done = pieces_.on_block(ev.block)) {
+                        disk_.write_piece(*done);
+                        peers_.broadcast_have(done->index);
+                        log(LogLevel::Debug, "piece {} complete & verified ({}/{})",
+                            done->index, pieces_.completed(), pieces_.total());
+                    }
                 }
-                try {
-                    auto data = disk_.read_block(ev.req.piece_index, ev.req.offset,
-                                                 ev.req.length);
-                    peers_.send_piece(ev.peer_id, ev.req.piece_index, ev.req.offset, data);
-                    up_since += data.size();
-                } catch (const std::exception& e) {
-                    // malformed request (bad offset/length), ignore, don't crash
-                    log(LogLevel::Debug, "peer {} bad request piece {} off {} len {}: {}",
-                        ev.peer_id, ev.req.piece_index, ev.req.offset, ev.req.length, e.what());
+                else if (ev.type == PeerEvent::Joined) {
+                    log(LogLevel::Debug, "peer {} joined", ev.peer_id);
+                    greet(ev.peer_id);
+                }
+                else if (ev.type == PeerEvent::Request) {
+                    if (!pieces_.have_piece(ev.req.piece_index)) {
+                        log(LogLevel::Debug, "peer {} requested piece {} we don't have; ignoring",
+                            ev.peer_id, ev.req.piece_index);
+                        continue;
+                    }
+                    try {
+                        auto data = disk_.read_block(ev.req.piece_index, ev.req.offset, ev.req.length);
+                        peers_.send_piece(ev.peer_id, ev.req.piece_index, ev.req.offset, data);
+                        up_since += data.size();
+                    } catch (const std::exception& e) {
+                        log(LogLevel::Debug, "peer {} bad request piece {} off {} len {}: {}",
+                            ev.peer_id, ev.req.piece_index, ev.req.offset, ev.req.length, e.what());
+                    }
                 }
             }
         }
