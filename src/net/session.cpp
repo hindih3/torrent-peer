@@ -3,6 +3,7 @@
 #include <chrono>
 #include <iomanip>
 #include <iostream>
+#include <ranges>
 #include <thread>
 
 namespace {
@@ -37,7 +38,7 @@ void Session::greet(uint32_t id) {
 }
 
 void Session::run(const std::atomic<bool>& shutdown) {
-    for (auto& [id, c] : peers_.connections())
+    for (const auto &id: peers_.connections() | std::views::keys)
         greet(id);
 
     const auto started = std::chrono::steady_clock::now();
@@ -58,34 +59,7 @@ void Session::run(const std::atomic<bool>& shutdown) {
             }
             // ready >= 0: process whatever came back
             for (auto& ev : peers_.handle_events(pfds)) {
-                if (ev.type == PeerEvent::Piece) {
-                    down_since += ev.block.data.size();
-                    if (auto done = pieces_.on_block(ev.block)) {
-                        disk_.write_piece(*done);
-                        peers_.broadcast_have(done->index);
-                        log(LogLevel::Debug, "piece {} complete & verified ({}/{})",
-                            done->index, pieces_.completed(), pieces_.total());
-                    }
-                }
-                else if (ev.type == PeerEvent::Joined) {
-                    log(LogLevel::Debug, "peer {} joined", ev.peer_id);
-                    greet(ev.peer_id);
-                }
-                else if (ev.type == PeerEvent::Request) {
-                    if (!pieces_.have_piece(ev.req.piece_index)) {
-                        log(LogLevel::Debug, "peer {} requested piece {} we don't have; ignoring",
-                            ev.peer_id, ev.req.piece_index);
-                        continue;
-                    }
-                    try {
-                        auto data = disk_.read_block(ev.req.piece_index, ev.req.offset, ev.req.length);
-                        peers_.send_piece(ev.peer_id, ev.req.piece_index, ev.req.offset, data);
-                        up_since += data.size();
-                    } catch (const std::exception& e) {
-                        log(LogLevel::Debug, "peer {} bad request piece {} off {} len {}: {}",
-                            ev.peer_id, ev.req.piece_index, ev.req.offset, ev.req.length, e.what());
-                    }
-                }
+                dispatch(ev, down_since, up_since);
             }
         }
 
@@ -133,5 +107,40 @@ void Session::run(const std::atomic<bool>& shutdown) {
         log(LogLevel::Info, "download complete in {:.1f} s", ms_since(started) / 1000.0);
     } else {
         log(LogLevel::Info, "ran out of peers");
+    }
+}
+
+void Session::dispatch(const PeerEvent& ev, uint64_t& down_since, uint64_t& up_since) {
+    switch (ev.type) {
+        case PeerEvent::Piece:   on_piece(ev, down_since); break;
+        case PeerEvent::Joined:  greet(ev.peer_id);        break;
+        case PeerEvent::Request: on_request(ev, up_since); break;
+        default: break;
+    }
+}
+
+void Session::on_piece(const PeerEvent& ev, uint64_t& down_since) {
+    down_since += ev.block.data.size();
+    if (auto done = pieces_.on_block(ev.block)) {
+        disk_.write_piece(*done);
+        peers_.broadcast_have(done->index);
+        log(LogLevel::Debug, "piece {} complete & verified ({}/{})",
+            done->index, pieces_.completed(), pieces_.total());
+    }
+}
+
+void Session::on_request(const PeerEvent& ev, uint64_t& up_since) {
+    if (!pieces_.have_piece(ev.req.piece_index)) {
+        log(LogLevel::Debug, "peer {} requested piece {} we don't have; ignoring",
+            ev.peer_id, ev.req.piece_index);
+        return;                       // <-- was `continue`
+    }
+    try {
+        auto data = disk_.read_block(ev.req.piece_index, ev.req.offset, ev.req.length);
+        peers_.send_piece(ev.peer_id, ev.req.piece_index, ev.req.offset, data);
+        up_since += data.size();
+    } catch (const std::exception& e) {
+        log(LogLevel::Debug, "peer {} bad request piece {} off {} len {}: {}",
+            ev.peer_id, ev.req.piece_index, ev.req.offset, ev.req.length, e.what());
     }
 }

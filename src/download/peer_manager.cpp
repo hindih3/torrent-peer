@@ -348,17 +348,6 @@ std::vector<PeerEvent> PeerManager::handle_events(std::span<pollfd> pfds) {
     return events;
 }
 
-std::vector<PeerEvent> PeerManager::poll_once(int timeout_ms) {
-    auto pfds = build_fds();
-    if (pfds.empty()) return {};
-    int ready = poll(pfds.data(), pfds.size(), timeout_ms);
-    if (ready < 0) {
-        if (errno == EINTR) return {};
-        throw_errno("poll");
-    }
-    return handle_events(pfds);
-}
-
 void PeerManager::handle_message(uint32_t peer_id, const std::vector<uint8_t>& msg,
                                  std::vector<PeerEvent>& out) {
     auto it = conns_.find(peer_id);

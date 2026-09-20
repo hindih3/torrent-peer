@@ -14,6 +14,10 @@ public:
 private:
     void greet(uint32_t peer_id);
 
+    void dispatch(const PeerEvent &ev, uint64_t &down_since, uint64_t &up_since);
+    void on_piece(const PeerEvent &ev, uint64_t &down_since);
+    void on_request(const PeerEvent &ev, uint64_t &up_since);
+
     const TorrentFile& torrent_;
     DiskManager  disk_;
     PieceManager pieces_;
