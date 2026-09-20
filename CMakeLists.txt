@@ -21,6 +21,8 @@ add_executable(torrent-peer
         src/download/disk_manager.hpp
         src/download/peer_manager.cpp
         src/download/peer_manager.hpp
+        src/download/tracker_manager.cpp
+        src/download/tracker_manager.hpp
 )
 
 target_include_directories(torrent-peer PRIVATE src)
