@@ -113,7 +113,7 @@ void Session::run(const std::atomic<bool>& shutdown) {
 void Session::dispatch(const PeerEvent& ev, uint64_t& down_since, uint64_t& up_since) {
     switch (ev.type) {
         case PeerEvent::Piece:   on_piece(ev, down_since); break;
-        case PeerEvent::Joined:  greet(ev.peer_id);        break;
+        case PeerEvent::Joined:  greet(ev.peer_id);           break;
         case PeerEvent::Request: on_request(ev, up_since); break;
         default: break;
     }
@@ -131,7 +131,7 @@ void Session::on_piece(const PeerEvent& ev, uint64_t& down_since) {
 
 void Session::on_request(const PeerEvent& ev, uint64_t& up_since) {
     if (!pieces_.have_piece(ev.req.piece_index)) {
-        log(LogLevel::Debug, "peer {} requested piece {} we don't have; ignoring",
+        log(LogLevel::Debug, "peer {} requested unavailable piece {}; ignoring",
             ev.peer_id, ev.req.piece_index);
         return;                       // <-- was `continue`
     }
