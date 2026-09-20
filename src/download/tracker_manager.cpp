@@ -129,3 +129,29 @@ void TrackerManager::send_connect(TrackerSession& t) {
     t.state = TrackerState::Connecting;
     t.connected_at = std::chrono::steady_clock::now();
 }
+
+// returns false only on a fatal socket error the caller must fail_backoff
+// success and ignored-noise both return true (nothing for the caller to do)
+bool TrackerManager::recv_connect(TrackerSession& t) {
+    uint8_t buf[16];
+    ssize_t n = ::recv(t.sockfd, buf, sizeof(buf), 0);
+    if (n < 0) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
+            return true;
+        return false;
+    }
+    if (n < 16) return true;
+    uint32_t action, txn;
+    memcpy(&action, buf,     4);   action = ntohl(action);
+    memcpy(&txn,buf + 4, 4);   txn    = ntohl(txn);
+
+    if (action != 0 || txn != t.transaction_id)
+        return true;
+
+    uint64_t cid; memcpy(&cid, buf + 8, 8);
+    t.connection_id = be64toh(cid);
+    t.connected_at  = std::chrono::steady_clock::now();
+    t.retries       = 0;
+    t.state         = TrackerState::Connected;
+    return true;
+}

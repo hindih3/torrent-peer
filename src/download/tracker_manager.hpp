@@ -70,6 +70,8 @@ private:
 
     void send_connect(TrackerSession &tracker);
 
+    [[nodiscard]] static bool recv_connect(TrackerSession &t);
+
 
     std::vector <TrackerSession> trackers_;
     const TorrentFile& torrent_;
