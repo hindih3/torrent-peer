@@ -1,9 +1,8 @@
 *.txt
 *.torrent
+*.log
 .idea/
 cmake-build-*/
 build/
 cmake-build-debug/
 idea/
-downloads/
-logs/
