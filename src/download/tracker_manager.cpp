@@ -2,9 +2,11 @@
 
 #include <fcntl.h>
 #include <netdb.h>
+#include <cerrno>
+#include <chrono>
+#include <cstring>
 #include <utility>
 #include <vector>
-#include <bits/fcntl-linux.h>
 
 #include "common.hpp"
 
@@ -13,20 +15,32 @@ TrackerManager::TrackerManager(const TorrentFile& torrent,
                    : torrent_(torrent), peer_id_(std::move(peer_id)),
                      listen_port_(listen_port), rng_(std::random_device{}())
 {
+    log(LogLevel::Debug, "initialising tracker manager (listen port {}, {} announce tier(s))",
+        listen_port_, torrent.announce_list.size());
+
     for (auto& tier : torrent.announce_list) {
         for (auto& url : tier) {
             try {
                 TrackerSession tracker;
                 tracker.address = parse_tracker_url(url);
+                log(LogLevel::Debug, "added tracker {}:{}",
+                    tracker.address.host, tracker.address.port);
                 trackers_.push_back(std::move(tracker));
             } catch (const std::exception& e) {
-                log(LogLevel::Debug, "skipping tracker: {}", e.what());
+                log(LogLevel::Debug, "skipping tracker {}: {}", url, e.what());
             }
         }
     }
+
+    if (trackers_.empty())
+        log(LogLevel::Warn, "no usable trackers found in torrent");
+    else
+        log(LogLevel::Info, "loaded {} tracker(s)", trackers_.size());
 }
 
 std::vector<uint8_t> TrackerManager::build_connect_request(const uint32_t transaction_id) {
+    log(LogLevel::Trace, "building connect request (txn={:#010x})", transaction_id);
+
     std::vector<uint8_t> packet(16);
 
     uint64_t protocol_id = htobe64(BITTORRENT_PROTOCOL);
@@ -46,6 +60,12 @@ std::vector<uint8_t> TrackerManager::build_announce_request(
 
     if (peer_id.size() != 20)
         throw std::runtime_error("peer_id must be exactly 20 bytes");
+
+    log(LogLevel::Trace,
+        "building announce request for {}:{} (txn={:#010x}, event={}, port={}, "
+        "downloaded={}, left={}, uploaded={})",
+        t.address.host, t.address.port, t.transaction_id,
+        static_cast<uint32_t>(e), port, p.downloaded, p.left, p.uploaded);
 
     std::vector<uint8_t> packet(98);
     uint64_t conn_id_be = htobe64(t.connection_id);
@@ -86,20 +106,27 @@ void TrackerManager::open_socket(TrackerSession& t) {
     hints.ai_family   = AF_INET;
     hints.ai_socktype = SOCK_DGRAM;
 
-    if (getaddrinfo(t.address.host.c_str(), t.address.port.c_str(),
-                    &hints, &res) != 0)
-        throw std::runtime_error("DNS resolution failed: " + t.address.host);
+    log(LogLevel::Trace, "resolving {}:{}", t.address.host, t.address.port);
+
+    if (int rc = getaddrinfo(t.address.host.c_str(), t.address.port.c_str(),
+                             &hints, &res); rc != 0)
+        throw std::runtime_error("DNS resolution failed for " + t.address.host +
+                                 ": " + gai_strerror(rc));
 
     int fd = createUDPIpv4Socket();
     fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
 
     if (connect(fd, res->ai_addr, res->ai_addrlen) == -1) {
+        // capture before close()
+        const int err = errno;
         freeaddrinfo(res);
         close(fd);
-        throw std::runtime_error("connect failed: " + t.address.host);
+        throw std::runtime_error("connect failed for " + t.address.host +
+                                 ": " + std::strerror(err));
     }
     freeaddrinfo(res);
     t.sockfd = fd;
+    log(LogLevel::Trace, "opened socket fd={} to {}:{}", fd, t.address.host, t.address.port);
 }
 
 void TrackerManager::fail_backoff(TrackerSession& t) {
@@ -108,6 +135,12 @@ void TrackerManager::fail_backoff(TrackerSession& t) {
     t.retries = std::min(t.retries + 1, 8);
     auto delay = std::chrono::seconds(15 * (1 << t.retries)); // 15·2^n
     t.next_action = std::chrono::steady_clock::now() + delay;
+
+    log(LogLevel::Debug, "{}:{} backing off for {}s (failure #{})",
+        t.address.host, t.address.port, delay.count(), t.retries);
+    if (t.retries >= 8)
+        log(LogLevel::Warn, "{}:{} keeps failing, retrying only every {}s. Might be dead",
+            t.address.host, t.address.port, delay.count());
 }
 
 void TrackerManager::send_connect(TrackerSession& t) {
@@ -123,11 +156,16 @@ void TrackerManager::send_connect(TrackerSession& t) {
     if (t.key == 0) t.key = next_random();
     auto packet = build_connect_request(t.transaction_id);
     if (::send(t.sockfd, packet.data(), packet.size(), 0) < 0) {
+        const int err = errno;   // capture before fail_backoff() calls close()
+        log(LogLevel::Debug, "send connect to {}:{} failed: {}",
+            t.address.host, t.address.port, std::strerror(err));
         fail_backoff(t);
         return;
     }
     t.state = TrackerState::Connecting;
     t.connected_at = std::chrono::steady_clock::now();
+    log(LogLevel::Debug, "sent connect request to {}:{} (txn={:#010x})",
+        t.address.host, t.address.port, t.transaction_id);
 }
 
 // returns false only on a fatal socket error the caller must fail_backoff
@@ -138,20 +176,40 @@ bool TrackerManager::recv_connect(TrackerSession& t) {
     if (n < 0) {
         if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
             return true;
+        log(LogLevel::Debug, "recv from {}:{} failed: {}",
+            t.address.host, t.address.port, std::strerror(errno));
         return false;
     }
-    if (n < 16) return true;
+    if (n < 16) {
+        log(LogLevel::Trace, "ignoring short connect response from {}:{} ({} bytes)",
+            t.address.host, t.address.port, n);
+        return true;
+    }
     uint32_t action, txn;
     memcpy(&action, buf,     4);   action = ntohl(action);
     memcpy(&txn,buf + 4, 4);   txn    = ntohl(txn);
 
-    if (action != 0 || txn != t.transaction_id)
+    if (action != 0 || txn != t.transaction_id) {
+        log(LogLevel::Trace,
+            "ignoring unexpected connect response from {}:{} "
+            "(action={}, txn={:#010x}, expected txn={:#010x})",
+            t.address.host, t.address.port, action, txn, t.transaction_id);
         return true;
+    }
 
     uint64_t cid; memcpy(&cid, buf + 8, 8);
+    const auto now = std::chrono::steady_clock::now();
+    const auto rtt = std::chrono::duration_cast<std::chrono::milliseconds>(
+                         now - t.connected_at);
+
     t.connection_id = be64toh(cid);
-    t.connected_at  = std::chrono::steady_clock::now();
+    t.connected_at  = now;
     t.retries       = 0;
     t.state         = TrackerState::Connected;
+
+    log(LogLevel::Debug, "connected to tracker {}:{} ({}ms)",
+        t.address.host, t.address.port, rtt.count());
+    log(LogLevel::Trace, "{}:{} connection_id={:#x}",
+        t.address.host, t.address.port, t.connection_id);
     return true;
 }
