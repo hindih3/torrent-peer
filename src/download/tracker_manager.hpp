@@ -73,6 +73,10 @@ public:
                    std::string  peer_id, uint16_t listen_port);
 
     [[nodiscard]] std::vector<pollfd> build_fds() const;
+
+    [[nodiscard]] std::vector<Peer> tick(std::span<const pollfd> pfds);
+    [[nodiscard]] std::chrono::milliseconds until_next_action() const;
+
 private:
     static std::vector<uint8_t> build_connect_request(uint32_t transaction_id);
     static std::vector<uint8_t> build_announce_request(

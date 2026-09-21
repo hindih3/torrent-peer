@@ -105,6 +105,47 @@ std::vector<pollfd> TrackerManager::build_fds() const {
     return pfds;
 }
 
+std::vector<Peer> TrackerManager::tick(std::span<const pollfd> pfds) {
+    std::vector<Peer> fresh;
+    if (pfds.size() != trackers_.size()) {
+        log(LogLevel::Error, "tick: got {} pollfds for {} trackers", pfds.size(), trackers_.size());
+        return fresh;
+    }
+    const auto now = std::chrono::steady_clock::now();
+
+    // Pass 1: packet-driven transitions
+    for (size_t i = 0; i < trackers_.size(); ++i) {
+        if (!(pfds[i].revents & (POLLIN | POLLERR | POLLHUP))) continue;
+        auto& t = trackers_[i];
+
+        bool ok = true;
+        switch (t.state) {
+            case TrackerState::Connecting: ok = recv_connect(t); break;
+            case TrackerState::Announcing: ok = recv_announce(t, fresh); break;
+            default: drain(t); break;
+        }
+        if (!ok) fail_backoff(t);
+    }
+
+    // Pass 2: timer-driven transitions, always runs
+    for (auto& t : trackers_) advance(t, now);
+
+    return fresh;
+}
+
+std::chrono::milliseconds TrackerManager::until_next_action() const {
+    using namespace std::chrono;
+    const auto now = steady_clock::now();
+    auto soonest = steady_clock::time_point::max();
+
+    for (const auto& t : trackers_)
+        soonest = std::min(soonest, t.next_action);
+
+    if (soonest == steady_clock::time_point::max()) return hours(1);  // no trackers
+    if (soonest <= now) return milliseconds(0);
+    return ceil<milliseconds>(soonest - now);
+}
+
 std::vector<uint8_t> TrackerManager::build_connect_request(const uint32_t transaction_id) {
     log(LogLevel::Trace, "building connect request (txn={:#010x})", transaction_id);
 
