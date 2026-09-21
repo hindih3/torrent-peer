@@ -380,3 +380,39 @@ bool TrackerManager::recv_announce(TrackerSession& t, std::vector<Peer>& out) {
         return true;
     }
 }
+
+void TrackerManager::drain(TrackerSession& t) {
+    while (::recv(t.sockfd, buf_.data(), buf_.size(), 0) >= 0) {}
+}
+
+void TrackerManager::on_timeout(TrackerSession& t, std::chrono::steady_clock::time_point now) {
+    t.retries     = std::min(t.retries + 1, 8);
+    t.state       = TrackerState::Disconnected;
+    t.next_action = now;
+    log(LogLevel::Debug, "{}:{} timed out, retry #{} (next deadline {}s)",
+        t.address.host, t.address.port, t.retries, response_timeout(t).count());
+}
+
+void TrackerManager::advance(TrackerSession& t, std::chrono::steady_clock::time_point now) {
+    switch (t.state) {
+        case TrackerState::Disconnected:
+            if (now >= t.next_action) send_connect(t);
+            return;
+
+        case TrackerState::Connecting:
+        case TrackerState::Announcing:
+            if (now >= t.next_action) on_timeout(t, now);
+            return;
+
+        case TrackerState::Connected:
+            send_announce(t);
+            return;
+
+        case TrackerState::Idle:
+            if (now >= t.next_action) t.state = TrackerState::Disconnected;
+            return;
+    }
+    log(LogLevel::Error, "{}:{} unknown TrackerState: {}",
+    t.address.host, t.address.port, static_cast<int>(t.state));
+    on_timeout(t, now);
+}

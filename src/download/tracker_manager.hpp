@@ -93,6 +93,10 @@ private:
     void send_announce(TrackerSession& t);
     [[nodiscard]] bool recv_announce(TrackerSession& t, std::vector<Peer>& out);
 
+    void advance(TrackerSession& t, std::chrono::steady_clock::time_point now);
+    static void on_timeout(TrackerSession& t, std::chrono::steady_clock::time_point now);
+    void drain(TrackerSession& t);
+
     std::vector<TrackerSession> trackers_;
     const TorrentFile& torrent_;
     std::string peer_id_;
