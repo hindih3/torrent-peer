@@ -24,6 +24,14 @@ add_executable(torrent-peer
         src/download/tracker_manager.cpp
         src/download/tracker_manager.hpp
 )
-
 target_include_directories(torrent-peer PRIVATE src)
 target_link_libraries(torrent-peer PRIVATE OpenSSL::Crypto)
+
+add_executable(tracker_probe
+        src/tools/tracker_probe.cpp
+        src/download/tracker_manager.cpp
+        src/bencode/parser.cpp
+        src/bencode/torrent.cpp
+)
+target_include_directories(tracker_probe PRIVATE src)
+target_link_libraries(tracker_probe PRIVATE OpenSSL::Crypto)
