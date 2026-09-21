@@ -97,6 +97,14 @@ TrackerManager::TrackerManager(const TorrentFile& torrent,
         log(LogLevel::Info, "loaded {} tracker(s)", trackers_.size());
 }
 
+std::vector<pollfd> TrackerManager::build_fds() const {
+    std::vector<pollfd> pfds;
+    pfds.reserve(trackers_.size());
+    for (const auto& t : trackers_)
+        pfds.push_back({.fd = t.sockfd, .events = POLLIN, .revents = 0});
+    return pfds;
+}
+
 std::vector<uint8_t> TrackerManager::build_connect_request(const uint32_t transaction_id) {
     log(LogLevel::Trace, "building connect request (txn={:#010x})", transaction_id);
 

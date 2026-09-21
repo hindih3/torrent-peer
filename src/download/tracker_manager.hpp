@@ -6,6 +6,8 @@
 #include <array>
 #include <stdexcept>
 #include <random>
+#include <poll.h>
+#include <span>
 
 #include "bencode/torrent.hpp"
 #include "bencode/utils.hpp"
@@ -70,6 +72,7 @@ public:
     TrackerManager(const TorrentFile& torrent,
                    std::string  peer_id, uint16_t listen_port);
 
+    [[nodiscard]] std::vector<pollfd> build_fds() const;
 private:
     static std::vector<uint8_t> build_connect_request(uint32_t transaction_id);
     static std::vector<uint8_t> build_announce_request(
