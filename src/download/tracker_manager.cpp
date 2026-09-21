@@ -228,3 +228,51 @@ bool TrackerManager::recv_connect(TrackerSession& t) {
         t.address.host, t.address.port, t.connection_id);
     return true;
 }
+
+TrackerEvent TrackerManager::pending_event(const TrackerSession& t) const {
+    switch (t.reported) {
+        case REPORTED_NOTHING:   return EVENT_STARTED;
+        case REPORTED_STARTED:   return download_complete_ ? EVENT_COMPLETED : EVENT_NONE;
+        case REPORTED_COMPLETED: return EVENT_NONE;
+    }
+    return EVENT_NONE;
+}
+
+void TrackerManager::send_announce(TrackerSession& t) {
+    const auto now = std::chrono::steady_clock::now();
+
+    if (now - t.connected_at >= std::chrono::seconds(60)) {
+        log(LogLevel::Debug, "{}:{} connection id expired, reconnecting",
+            t.address.host, t.address.port);
+        t.state       = TrackerState::Disconnected;
+        t.next_action = now;
+        return;
+    }
+
+    const TrackerEvent event = pending_event(t);
+    t.transaction_id = next_random();
+    t.in_flight      = event;
+
+    const AnnounceParams params{
+        .downloaded = downloaded_,
+        .uploaded   = uploaded_,
+        .left       = left_,
+    };
+    auto packet = build_announce_request(t, event, peer_id_, torrent_.info_hash,
+                                         listen_port_, params);
+
+    if (::send(t.sockfd, packet.data(), packet.size(), 0) < 0) {
+        const int err = errno;
+        log(LogLevel::Debug, "send announce to {}:{} failed: {}",
+            t.address.host, t.address.port, std::strerror(err));
+        fail_backoff(t);
+        return;
+    }
+
+    t.state       = TrackerState::Announcing;
+    t.next_action = now + response_timeout(t);
+
+    log(LogLevel::Debug, "sent announce to {}:{} (event={}, txn={:#010x}, left={})",
+    t.address.host, t.address.port, static_cast<uint32_t>(event),
+    t.transaction_id, left_);
+}

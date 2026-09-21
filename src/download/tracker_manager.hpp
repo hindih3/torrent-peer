@@ -19,6 +19,8 @@ enum TrackerEvent : uint8_t {
     EVENT_NONE = 0, EVENT_COMPLETED = 1, EVENT_STARTED = 2, EVENT_STOPPED = 3
 };
 
+enum Reported : uint8_t { REPORTED_NOTHING, REPORTED_STARTED, REPORTED_COMPLETED };
+
 enum class TrackerState {
     Disconnected,   // no valid connection_id; must connect
     Connecting,     // connect sent, awaiting connection_id
@@ -36,9 +38,16 @@ struct TrackerSession {
     uint32_t transaction_id = 0;
     uint32_t key = 0;
 
-    std::chrono::steady_clock::time_point connected_at;  // for the 60s expiry check
+    // connected_at has a dual-purpose. send_connect sets it to the send time so
+    // recv_connect can log the round-trip time, then recv_connect overwrites it
+    // with the time the connection ID arrived, for the 60-second expiry. They
+    // never conflict because the former expires the moment the latter begins
+    std::chrono::steady_clock::time_point connected_at;
     std::chrono::steady_clock::time_point next_action;  // when Idle expires
     int retries = 0;
+
+    TrackerEvent in_flight = EVENT_NONE;
+    Reported     reported  = REPORTED_NOTHING;
 
     uint32_t interval = 0;
     uint32_t seeders  = 0;
@@ -71,12 +80,15 @@ private:
     void send_connect(TrackerSession& tracker);
     [[nodiscard]] static bool recv_connect(TrackerSession& t);
 
+    [[nodiscard]] TrackerEvent pending_event(const TrackerSession& t) const;
+    void send_announce(TrackerSession& t);
 
     std::vector<TrackerSession> trackers_;
     const TorrentFile& torrent_;
     std::string peer_id_;
     uint16_t listen_port_;
     uint64_t downloaded_ = 0, left_ = 0, uploaded_ = 0;
+    bool download_complete_ = false;
     std::mt19937 rng_;
     uint32_t key_;
 };
