@@ -24,7 +24,7 @@ enum class TrackerState {
     Connecting,     // connect sent, awaiting connection_id
     Connected,      // have connection_id, ready to announce
     Announcing,     // announce sent, awaiting response
-    Idle,           // announced; next announce due at next_announce
+    Idle,           // announced; next announce due at next_action
 };
 
 struct TrackerSession {
@@ -34,7 +34,7 @@ struct TrackerSession {
     int sockfd = -1;
     uint64_t connection_id = 0;
     uint32_t transaction_id = 0;
-    uint32_t key = 0; // TODO: seeded in future send_connect; 0 until then
+    uint32_t key = 0;
 
     std::chrono::steady_clock::time_point connected_at;  // for the 60s expiry check
     std::chrono::steady_clock::time_point next_action;  // when Idle expires
@@ -64,19 +64,19 @@ private:
 
     uint32_t next_random();
 
-    static void open_socket(TrackerSession &t);
+    static void open_socket(TrackerSession& t);
 
-    static void fail_backoff(TrackerSession &t);
+    static void fail_backoff(TrackerSession& t);
 
-    void send_connect(TrackerSession &tracker);
+    void send_connect(TrackerSession& tracker);
+    [[nodiscard]] static bool recv_connect(TrackerSession& t);
 
-    [[nodiscard]] static bool recv_connect(TrackerSession &t);
 
-
-    std::vector <TrackerSession> trackers_;
+    std::vector<TrackerSession> trackers_;
     const TorrentFile& torrent_;
     std::string peer_id_;
     uint16_t listen_port_;
     uint64_t downloaded_ = 0, left_ = 0, uploaded_ = 0;
     std::mt19937 rng_;
+    uint32_t key_;
 };

@@ -10,10 +10,20 @@
 
 #include "common.hpp"
 
+namespace {
+    std::chrono::seconds response_timeout(const TrackerSession& t) {
+        return std::chrono::seconds(15 << t.retries);   // BEP 15: 15 * 2^n
+    }
+}
+
 TrackerManager::TrackerManager(const TorrentFile& torrent,
-                               std::string  peer_id, uint16_t listen_port)
-                   : torrent_(torrent), peer_id_(std::move(peer_id)),
-                     listen_port_(listen_port), rng_(std::random_device{}())
+                               std::string peer_id, uint16_t listen_port)
+    : torrent_(torrent),
+      peer_id_(std::move(peer_id)),
+      listen_port_(listen_port),
+      left_(torrent.total_length),
+      rng_(std::random_device{}()),
+      key_(static_cast<uint32_t>(rng_()))
 {
     log(LogLevel::Debug, "initialising tracker manager (listen port {}, {} announce tier(s))",
         listen_port_, torrent.announce_list.size());
@@ -23,6 +33,7 @@ TrackerManager::TrackerManager(const TorrentFile& torrent,
             try {
                 TrackerSession tracker;
                 tracker.address = parse_tracker_url(url);
+                tracker.key = key_;
                 log(LogLevel::Debug, "added tracker {}:{}",
                     tracker.address.host, tracker.address.port);
                 trackers_.push_back(std::move(tracker));
@@ -144,16 +155,17 @@ void TrackerManager::fail_backoff(TrackerSession& t) {
 }
 
 void TrackerManager::send_connect(TrackerSession& t) {
-    try {
-        open_socket(t);
-    } catch (const std::exception& e) {
-        log(LogLevel::Debug, "connect failed for {}: {}", t.address.host, e.what());
-        fail_backoff(t);
-        return;
+    if (t.sockfd < 0) {
+        try {
+            open_socket(t);
+        } catch (const std::exception& e) {
+            log(LogLevel::Debug, "connect failed for {}: {}", t.address.host, e.what());
+            fail_backoff(t);
+            return;
+        }
     }
 
     t.transaction_id = next_random();
-    if (t.key == 0) t.key = next_random();
     auto packet = build_connect_request(t.transaction_id);
     if (::send(t.sockfd, packet.data(), packet.size(), 0) < 0) {
         const int err = errno;   // capture before fail_backoff() calls close()
@@ -162,8 +174,11 @@ void TrackerManager::send_connect(TrackerSession& t) {
         fail_backoff(t);
         return;
     }
-    t.state = TrackerState::Connecting;
-    t.connected_at = std::chrono::steady_clock::now();
+
+    const auto now = std::chrono::steady_clock::now();
+    t.state        = TrackerState::Connecting;
+    t.connected_at = now;                        // send time, for the RTT log
+    t.next_action  = now + response_timeout(t);  // give up if no reply by then
     log(LogLevel::Debug, "sent connect request to {}:{} (txn={:#010x})",
         t.address.host, t.address.port, t.transaction_id);
 }
