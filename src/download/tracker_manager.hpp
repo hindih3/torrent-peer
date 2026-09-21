@@ -60,6 +60,11 @@ struct AnnounceParams {
     uint64_t left;
 };
 
+struct Peer {
+    std::string host;
+    std::string port;
+};
+
 class TrackerManager {
 public:
     TrackerManager(const TorrentFile& torrent,
@@ -81,13 +86,16 @@ private:
     [[nodiscard]] static bool recv_connect(TrackerSession& t);
 
     [[nodiscard]] TrackerEvent pending_event(const TrackerSession& t) const;
+
     void send_announce(TrackerSession& t);
+    [[nodiscard]] bool recv_announce(TrackerSession& t, std::vector<Peer>& out);
 
     std::vector<TrackerSession> trackers_;
     const TorrentFile& torrent_;
     std::string peer_id_;
     uint16_t listen_port_;
     uint64_t downloaded_ = 0, left_ = 0, uploaded_ = 0;
+    std::vector<uint8_t> buf_ = std::vector<uint8_t>(65536);
     bool download_complete_ = false;
     std::mt19937 rng_;
     uint32_t key_;

@@ -7,12 +7,60 @@
 #include <cstring>
 #include <utility>
 #include <vector>
+#include <algorithm>
 
 #include "common.hpp"
 
 namespace {
     std::chrono::seconds response_timeout(const TrackerSession& t) {
         return std::chrono::seconds(15 << t.retries);   // BEP 15: 15 * 2^n
+    }
+
+    uint32_t read_be32(const uint8_t* p) {
+        uint32_t v;
+        std::memcpy(&v, p, 4);
+        return ntohl(v);
+    }
+
+    struct AnnounceReply {
+        enum Kind { Ignore, Ok, Error } kind = Ignore;
+        uint32_t interval = 0, leechers = 0, seeders = 0;
+        std::vector<Peer> peers;
+        std::string error;
+    };
+
+    // pure function that only extracts meaning. Doesn't alter sockets or state
+    AnnounceReply parse_announce_reply(const uint8_t* buf, size_t n, uint32_t expect_txn) {
+        AnnounceReply r;
+        if (n < 8) return r;
+
+        const uint32_t action = read_be32(buf);
+        const uint32_t txn    = read_be32(buf + 4);
+        if (txn != expect_txn) return r;                 // txn_id mismatch
+
+        if (action == 3) {                               // tracker-reported error
+            r.kind = AnnounceReply::Error;
+            r.error.assign(reinterpret_cast<const char*>(buf + 8), n - 8);
+            return r;
+        }
+        if (action != 1 || n < 20) return r;             // not an announce reply
+
+        r.kind     = AnnounceReply::Ok;
+        r.interval = read_be32(buf + 8);
+        r.leechers = read_be32(buf + 12);
+        r.seeders  = read_be32(buf + 16);
+
+        for (size_t off = 20; off + 6 <= n; off += 6) {
+            uint16_t port;
+            std::memcpy(&port, buf + off + 4, 2);
+            port = ntohs(port);
+            if (port == 0) continue;                     // garbage entry
+
+            char ip[INET_ADDRSTRLEN];
+            inet_ntop(AF_INET, buf + off, ip, sizeof ip);
+            r.peers.push_back({ip, std::to_string(port)});
+        }
+        return r;
     }
 }
 
@@ -275,4 +323,52 @@ void TrackerManager::send_announce(TrackerSession& t) {
     log(LogLevel::Debug, "sent announce to {}:{} (event={}, txn={:#010x}, left={})",
     t.address.host, t.address.port, static_cast<uint32_t>(event),
     t.transaction_id, left_);
+}
+
+// Returns false only when the caller must fail_backoff.
+bool TrackerManager::recv_announce(TrackerSession& t, std::vector<Peer>& out) {
+    while (true) {
+        ssize_t n = ::recv(t.sockfd, buf_.data(), buf_.size(), 0);
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            if (errno == EAGAIN || errno == EWOULDBLOCK) return true;   // nothing left
+            log(LogLevel::Debug, "recv from {}:{} failed: {}",
+                t.address.host, t.address.port, std::strerror(errno));
+            return false;
+        }
+
+        AnnounceReply r = parse_announce_reply(buf_.data(), static_cast<size_t>(n),
+                                               t.transaction_id);
+
+        if (r.kind == AnnounceReply::Ignore) {
+            log(LogLevel::Trace, "ignoring {} byte datagram from {}:{}",
+                n, t.address.host, t.address.port);
+            continue;                                // keep draining
+        }
+        if (r.kind == AnnounceReply::Error) {
+            log(LogLevel::Warn, "{}:{} tracker error: {}",
+                t.address.host, t.address.port, r.error);
+            return false;
+        }
+
+        if (t.in_flight == EVENT_STARTED)   t.reported = REPORTED_STARTED;
+        if (t.in_flight == EVENT_COMPLETED) t.reported = REPORTED_COMPLETED;
+
+        const uint32_t interval = r.interval == 0 ? 1800u : r.interval;   // std::clamp needs all
+        t.interval = std::clamp(interval, 300u, 86400u);        // 3 args the same type
+        t.seeders  = r.seeders;
+        t.leechers = r.leechers;
+        t.retries  = 0;
+
+        t.state       = TrackerState::Idle;
+        t.next_action = std::chrono::steady_clock::now() + std::chrono::seconds(t.interval);
+
+        log(LogLevel::Info, "{}:{}: {} peers, {} seeders, {} leechers, next announce in {}s",
+            t.address.host, t.address.port, r.peers.size(),
+            t.seeders, t.leechers, t.interval);
+
+        out.insert(out.end(), std::make_move_iterator(r.peers.begin()),
+                              std::make_move_iterator(r.peers.end()));
+        return true;
+    }
 }
