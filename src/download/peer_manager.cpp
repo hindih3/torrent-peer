@@ -1,3 +1,4 @@
+#include <charconv>
 #include "peer_manager.hpp"
 
 #include <cstring>
@@ -11,6 +12,11 @@
 #include "bencode/torrent.hpp"
 
 namespace {
+    constexpr size_t kMaxHalfOpen      = 20;    // concurrent dials, leaves room for inbound
+    constexpr size_t kMaxCandidates    = 1000;  // bound on queued addresses
+    constexpr auto   kConnectTimeout   = std::chrono::seconds(10);
+    constexpr auto   kHandshakeTimeout = std::chrono::seconds(15);
+
     std::vector<uint8_t> build_handshake(const TorrentFile& torrent,
                                      const std::string& peer_id) {
         if (peer_id.size() != 20)
@@ -122,6 +128,7 @@ PeerManager::PeerManager(std::vector<PeerConnection> conns,
 PeerManager::~PeerManager() {
     for (auto& [id, c] : conns_)   if (c.sockfd >= 0) close(c.sockfd);
     for (auto& p : inbound_)       if (p.sockfd >= 0) close(p.sockfd);
+    for (auto& p : outbound_)      if (p.sockfd >= 0) close(p.sockfd);
     if (listen_fd_ >= 0) close(listen_fd_);
 }
 
@@ -140,7 +147,7 @@ void PeerManager::accept_new() {
             break;   // EAGAIN/EWOULDBLOCK: backlog drained
         }
 
-        if (conns_.size() + inbound_.size() >= max_peers_) {
+        if (conns_.size() + inbound_.size() + outbound_.size() >= max_peers_) {
             close(fd);   // at capacity; let them retry later
             continue;
         }
@@ -212,6 +219,14 @@ std::vector<pollfd> PeerManager::build_fds() {
     for (const auto& p : inbound_)
         pfds.push_back({.fd = p.sockfd, .events = POLLIN, .revents = 0});
 
+    // Connecting sockets become writable when the TCP connect finishes;
+    // handshaking ones become readable when the peer's reply arrives.
+    outbound_at_ = pfds.size();
+    for (const auto& o : outbound_) {
+        const short ev = o.phase == PendingOutbound::Phase::Connecting ? POLLOUT : POLLIN;
+        pfds.push_back({.fd = o.sockfd, .events = ev, .revents = 0});
+    }
+
     conns_at_ = pfds.size();
     // refresh stale id list
     ids_.clear();
@@ -228,12 +243,9 @@ std::vector<pollfd> PeerManager::build_fds() {
     return pfds;
 }
 
-std::vector<PeerEvent> PeerManager::handle_events(std::span<pollfd> pfds) {
+std::vector<PeerEvent> PeerManager::handle_events(const std::span<pollfd> pfds) {
     std::vector<PeerEvent> events;
 
-    // Sweep handshakes that have gone quiet.
-    expire_inbound(std::chrono::seconds(15));
-    const bool listening = listen_fd_ >= 0;
     // 1. new connections
     if (const bool listening = listen_fd_ >= 0; listening && (pfds[0].revents & POLLIN))
         accept_new();
@@ -266,6 +278,27 @@ std::vector<PeerEvent> PeerManager::handle_events(std::span<pollfd> pfds) {
             // Promoted: fd now owned by conns_, do not close, do not keep
         }
         inbound_ = std::move(still_pending);
+    }
+
+    if (!outbound_.empty()) {
+        std::vector<PendingOutbound> still_pending;
+        still_pending.reserve(outbound_.size());
+
+        for (size_t i = 0; i < outbound_.size(); ++i) {
+            PendingOutbound& p = outbound_[i];
+            const short rev = pfds[outbound_at_ + i].revents;
+
+            const HandshakeResult r = rev ? advance_outbound(p, rev, events)
+                                          : HandshakeResult::Keep;
+            if (r == HandshakeResult::Keep) {
+                still_pending.push_back(std::move(p));
+            } else if (r == HandshakeResult::Drop) {
+                close(p.sockfd);
+                known_.erase(key(p.peer));
+            }
+            // Promoted: fd owned by conns_, address stays in known_
+        }
+        outbound_ = std::move(still_pending);
     }
 
     // 3. established peers. Note conns_ may have grown in step 2; the new
@@ -333,11 +366,18 @@ std::vector<PeerEvent> PeerManager::handle_events(std::span<pollfd> pfds) {
         if (it == conns_.end()) continue;
 
         apply_availability(it->second.has_pieces, -1);
+        known_.erase(key(it->second.peer));
 
         close(it->second.sockfd);
         conns_.erase(it);
-        events.push_back({PeerEvent::Dropped, id, {}, {}});
+        events.push_back({.type = PeerEvent::Dropped, .peer_id = id, .block = {}, .req = {}});
     }
+
+    expire_inbound(std::chrono::seconds(15));
+    expire_outbound();
+
+    // Refill any slots freed this loop. New sockets join the next build_fds().
+    dial_more();
 
     return events;
 }
@@ -527,6 +567,132 @@ void PeerManager::queue(PeerConnection& c, const std::vector<uint8_t>& msg) {
 void PeerManager::apply_availability(const Bitfield& bf, int delta) {
     for (uint32_t i = 0; i < piece_frequency_.size(); ++i)
         if (bf.get(i)) piece_frequency_[i] += delta;
+}
+
+void PeerManager::add_peers(std::vector<Peer> peers) {
+    size_t added = 0;
+    for (auto& p : peers) {
+        if (candidates_.size() >= kMaxCandidates) break;
+        if (!known_.insert(key(p)).second) continue;
+        candidates_.push_back(std::move(p));
+        ++added;
+    }
+    log(LogLevel::Debug, "queued {} new peer(s), {} waiting", added, candidates_.size());
+    dial_more();
+}
+
+void PeerManager::dial_more() {
+    while (!candidates_.empty()
+           && outbound_.size() < kMaxHalfOpen
+           && conns_.size() + inbound_.size() + outbound_.size() < max_peers_) {
+        Peer p = std::move(candidates_.front());
+        candidates_.pop_front();
+        if (!start_dial(p)) known_.erase(key(p));
+    }
+}
+
+bool PeerManager::start_dial(const Peer& peer) {
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+
+    uint16_t port = 0;
+    const char* first = peer.port.data();
+    const char* last  = first + peer.port.size();
+    auto [end, ec] = std::from_chars(first, last, port);
+    if (ec != std::errc{} || end != last || port == 0 ||
+        inet_pton(AF_INET, peer.host.c_str(), &addr.sin_addr) != 1) {
+        log(LogLevel::Debug, "outbound {}:{}: bad address", peer.host, peer.port);
+        return false;
+    }
+    addr.sin_port = htons(port);
+
+    const int fd = ::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
+    if (fd < 0) {
+        log(LogLevel::Warn, "outbound socket() failed: {}", strerror(errno));
+        return false;
+    }
+
+    // Non-blocking connect: EINPROGRESS is the normal answer. The result
+    // arrives later as POLLOUT, and SO_ERROR says whether it worked.
+    if (::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0
+        && errno != EINPROGRESS) {
+        const int err = errno;
+        close(fd);
+        log(LogLevel::Debug, "outbound {}:{}: connect failed: {}",
+            peer.host, peer.port, strerror(err));
+        return false;
+    }
+
+    PendingOutbound o;
+    o.sockfd   = fd;
+    o.peer     = peer;
+    o.deadline = std::chrono::steady_clock::now() + kConnectTimeout;
+    outbound_.push_back(std::move(o));
+
+    log(LogLevel::Trace, "dialing {}:{}", peer.host, peer.port);
+    return true;
+}
+
+PeerManager::HandshakeResult PeerManager::advance_outbound(PendingOutbound& p, short rev,
+                                                           std::vector<PeerEvent>& out) {
+    if (p.phase == PendingOutbound::Phase::Connecting) {
+        int err = 0;
+        socklen_t len = sizeof(err);
+        if (getsockopt(p.sockfd, SOL_SOCKET, SO_ERROR, &err, &len) < 0) err = errno;
+        if (err != 0) {
+            log(LogLevel::Trace, "outbound {}:{}: connect failed: {}",
+                p.peer.host, p.peer.port, strerror(err));
+            return HandshakeResult::Drop;
+        }
+
+        const auto hs = build_handshake(torrent_, peer_id_);
+        const ssize_t w = ::send(p.sockfd, hs.data(), hs.size(), MSG_NOSIGNAL);
+        if (w != static_cast<ssize_t>(hs.size())) {
+            log(LogLevel::Debug, "Partial handshake write to {}:{}",
+                p.peer.host, p.peer.port);
+        }
+
+        p.phase    = PendingOutbound::Phase::Handshaking;
+        p.deadline = std::chrono::steady_clock::now() + kHandshakeTimeout;
+        return HandshakeResult::Keep;
+    }
+
+    // Handshaking: same capped read as inbound, so anything the peer sends
+    // behind its handshake (usually the bitfield) stays for the normal path.
+    if (!(rev & (POLLIN | POLLERR | POLLHUP))) return HandshakeResult::Keep;
+
+    const ssize_t n = recv(p.sockfd, p.buffer.data() + p.received, 68 - p.received, 0);
+    if (n < 0) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
+            return HandshakeResult::Keep;
+        return HandshakeResult::Drop;
+    }
+    if (n == 0) return HandshakeResult::Drop;
+
+    p.received += static_cast<size_t>(n);
+    if (p.received < 68) return HandshakeResult::Keep;
+
+    if (!verify_handshake(p.buffer, p.peer)) return HandshakeResult::Drop;
+
+    promote(p.sockfd, p.peer, out);
+    log(LogLevel::Debug, "handshake ok (outbound): {}:{}", p.peer.host, p.peer.port);
+
+    p.sockfd = -1;   // ownership moved into conns_
+    return HandshakeResult::Promoted;
+}
+
+void PeerManager::expire_outbound() {
+    const auto now = std::chrono::steady_clock::now();
+    for (auto it = outbound_.begin(); it != outbound_.end(); ) {
+        if (now >= it->deadline) {
+            log(LogLevel::Trace, "outbound {}:{}: timed out", it->peer.host, it->peer.port);
+            close(it->sockfd);
+            known_.erase(key(it->peer));
+            it = outbound_.erase(it);
+        } else {
+            ++it;
+        }
+    }
 }
 
 bool PeerManager::verify_handshake(const std::array<uint8_t, 68>& hs, const Peer& peer) const {
