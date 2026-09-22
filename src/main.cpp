@@ -17,7 +17,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    std::filesystem::path out_dir  = "/home/hamza/CLionProjects/torrent-peer/downloads";
+    std::filesystem::path out_dir  = "downloads";
     uint16_t              port     = 51413;
     bool                  use_tracker = true;
     std::vector<Peer>     manual_peers;
@@ -74,24 +74,10 @@ int main(int argc, char** argv) {
 
         std::string peer_id = generate_peer_id();
         signal(SIGPIPE, SIG_IGN);
-
-        std::vector<Peer> peers = manual_peers;
-        if (use_tracker) {
-            try {
-                auto found = contact_trackers(torrent, peer_id, port);
-                peers.insert(peers.end(), found.begin(), found.end());
-            } catch (const std::exception& e) {
-                std::cerr << "tracker: " << e.what() << "\n";
-            }
-        }
-
-        auto sockets = tcp_connect_peers(peers);
-        auto conns   = handshake_peers(sockets, torrent, peer_id);
+        std::signal(SIGINT, handle_sigint);
 
         std::cerr << "saving to " << std::filesystem::absolute(out_dir) << "\n";
-        Session session(torrent, std::move(conns), out_dir, peer_id, port);
-
-        std::signal(SIGINT, handle_sigint);
+        Session session(torrent, manual_peers, out_dir, peer_id, port, use_tracker);
         session.run(g_shutdown);
 
         return 0;

@@ -4,12 +4,11 @@
 #include <iomanip>
 #include <iostream>
 #include <ranges>
-#include <thread>
+#include <span>
 
 namespace {
-bool announced_complete = false;
 constexpr int  kPipelineDepth  = 8;                        // requests in flight per peer
-constexpr auto kRequestTimeout = std::chrono::seconds(30); // before a block goes back in the pool
+constexpr auto kRequestTimeout = std::chrono::seconds(15); // before a block goes back in the pool
 
 int64_t ms_since(std::chrono::steady_clock::time_point t) {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -17,15 +16,19 @@ int64_t ms_since(std::chrono::steady_clock::time_point t) {
 }
 }
 
-Session::Session(const TorrentFile& torrent, std::vector<PeerConnection> conns,
+Session::Session(const TorrentFile& torrent, std::vector<Peer> initial_peers,
                  const std::filesystem::path& download_dir,
-                 const std::string& peer_id, uint16_t listen_port)
+                 const std::string& peer_id, uint16_t listen_port, bool use_trackers)
     : torrent_(torrent),
       disk_(torrent, download_dir),
       pieces_(torrent),
-      peers_(std::move(conns), torrent, peer_id, listen_port) {}
+      peers_({}, torrent, peer_id, listen_port),
+      trackers_(torrent, peer_id, listen_port),
+      use_trackers_(use_trackers)
+{
+    peers_.add_peers(std::move(initial_peers));
+}
 
-// Everything a peer needs on arrival, whether we dialed them or they dialed us.
 void Session::greet(uint32_t id) {
     auto bf = pieces_.have_bitfield();
     log(LogLevel::Debug, "greet peer {} ({}/{} pieces)",
@@ -38,38 +41,44 @@ void Session::greet(uint32_t id) {
 }
 
 void Session::run(const std::atomic<bool>& shutdown) {
-    for (const auto &id: peers_.connections() | std::views::keys)
-        greet(id);
-
     const auto started = std::chrono::steady_clock::now();
     auto last_report   = started;
 
     uint64_t down_since = 0;   // bytes downloaded since the last status line
     uint64_t up_since   = 0;   // bytes uploaded since the last status line
-    while (!shutdown.load() && !peers_.empty()) {
-        int timeout_ms = 1000;
+
+    while (!shutdown.load()) {
+        // One pollfd list: peers first, trackers after.
         auto pfds = peers_.build_fds();
-        if (pfds.empty()) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(timeout_ms));
-        } else {
-            int ready = poll(pfds.data(), pfds.size(), timeout_ms);
-            if (ready < 0) {
-                if (errno == EINTR) continue;
-                throw_errno("poll");
-            }
-            // ready >= 0: process whatever came back
-            for (auto& ev : peers_.handle_events(pfds)) {
-                dispatch(ev, down_since, up_since);
-            }
+        const size_t tracker_base = pfds.size();
+        if (use_trackers_) {
+            auto tfds = trackers_.build_fds();
+            pfds.insert(pfds.end(), tfds.begin(), tfds.end());
+        }
+
+        // Sleep until a socket has something, or the next tracker timer is due.
+        auto wait = std::chrono::milliseconds(1000);
+        if (use_trackers_) wait = std::min(wait, trackers_.until_next_action());
+        if (poll(pfds.data(), pfds.size(), static_cast<int>(wait.count())) < 0) {
+            if (errno == EINTR) continue;
+            throw_errno("poll");
+        }
+
+        std::span<pollfd> all(pfds);
+        for (auto& ev : peers_.handle_events(all.first(tracker_base)))
+            dispatch(ev, down_since, up_since);
+        if (use_trackers_) {
+            auto fresh = trackers_.tick(all.subspan(tracker_base));
+            if (!fresh.empty()) peers_.add_peers(std::move(fresh));
         }
 
         pieces_.requeue_stale(kRequestTimeout);
 
-        if (pieces_.is_complete() && !announced_complete) {
+        if (pieces_.is_complete() && !completed_) {
+            completed_ = true;
             disk_.sync();
-            log(LogLevel::Info, "download complete in {:.1f} | seeding",
+            log(LogLevel::Info, "download complete in {:.1f} s | seeding",
                 ms_since(started) / 1000.0);
-            announced_complete = true;
         }
 
         // Keep every unchoked peer's pipe full instead of one block per round
@@ -102,12 +111,9 @@ void Session::run(const std::atomic<bool>& shutdown) {
         }
     }
 
-    if (pieces_.is_complete()) {
-        disk_.sync();
-        log(LogLevel::Info, "download complete in {:.1f} s", ms_since(started) / 1000.0);
-    } else {
-        log(LogLevel::Info, "ran out of peers");
-    }
+    disk_.sync();
+    log(LogLevel::Info, "stopped after {:.1f} s ({}/{} pieces)",
+        ms_since(started) / 1000.0, pieces_.completed(), pieces_.total());
 }
 
 void Session::dispatch(const PeerEvent& ev, uint64_t& down_since, uint64_t& up_since) {

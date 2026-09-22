@@ -8,10 +8,8 @@ find_package(OpenSSL REQUIRED)
 
 add_executable(torrent-peer
         src/main.cpp
-        src/net/peer.cpp
         src/net/session.hpp
         src/bencode/torrent.cpp
-        src/net/tracker.cpp
         src/net/session.cpp
         src/bencode/parser.cpp
         src/download/piece_manager.cpp
