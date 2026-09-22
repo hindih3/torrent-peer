@@ -33,3 +33,15 @@ add_executable(tracker_probe
 )
 target_include_directories(tracker_probe PRIVATE src)
 target_link_libraries(tracker_probe PRIVATE OpenSSL::Crypto)
+
+add_executable(peer_probe
+        src/tools/peer_probe.cpp
+        src/download/peer_manager.hpp
+        src/download/peer_manager.cpp
+        src/bencode/utils.hpp
+        src/bencode/torrent.hpp
+        src/bencode/torrent.cpp
+        src/bencode/parser.cpp
+)
+target_include_directories(peer_probe PRIVATE src)
+target_link_libraries(peer_probe PRIVATE OpenSSL::Crypto)
