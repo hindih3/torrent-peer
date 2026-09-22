@@ -100,3 +100,27 @@ private:
     uint32_t             bits_ = 0;
     std::vector<uint8_t> bytes_;
 };
+
+struct Peer {
+    std::string host;
+    std::string port;
+};
+
+struct PeerConnection {
+    uint32_t id;
+
+    int sockfd;
+    Peer peer;
+    bool am_choking      = true;
+    bool am_interested   = false;
+    bool peer_choking    = true;
+    bool peer_interested = false;
+
+    bool got_bitfield = false;
+
+    int outstanding = 0;
+
+    Bitfield             has_pieces;
+    std::vector<uint8_t> read_buffer;
+    std::vector<uint8_t> write_buffer;
+};

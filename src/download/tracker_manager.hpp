@@ -11,6 +11,7 @@
 
 #include "bencode/torrent.hpp"
 #include "bencode/utils.hpp"
+#include "common.hpp"
 // use TrackerAddress and parse_tracker_url from utils,
 // tracker.hpp relies on them too, so they can't
 // be moved until tracker_manager replaces tracker
@@ -60,11 +61,6 @@ struct AnnounceParams {
     uint64_t downloaded;
     uint64_t uploaded;
     uint64_t left;
-};
-
-struct Peer {
-    std::string host;
-    std::string port;
 };
 
 class TrackerManager {

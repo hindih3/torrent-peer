@@ -17,25 +17,6 @@ struct PeerSocket {
     Peer peer;
 };
 
-struct PeerConnection {
-    uint32_t id;
-
-    int sockfd;
-    Peer peer;
-    bool am_choking      = true;
-    bool am_interested   = false;
-    bool peer_choking    = true;
-    bool peer_interested = false;
-
-    bool got_bitfield = false;
-
-    int outstanding = 0;
-
-    Bitfield             has_pieces;
-    std::vector<uint8_t> read_buffer;
-    std::vector<uint8_t> write_buffer;
-};
-
 bool send_all(int fd, const uint8_t* data, size_t len);
 
 std::vector<uint8_t> build_handshake(const TorrentFile& torrent,
