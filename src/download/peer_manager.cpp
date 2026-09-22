@@ -7,6 +7,26 @@
 #include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include "bencode/utils.hpp"
+#include "bencode/torrent.hpp"
+
+namespace {
+    std::vector<uint8_t> build_handshake(const TorrentFile& torrent,
+                                     const std::string& peer_id) {
+        if (peer_id.size() != 20)
+            throw std::runtime_error("peer_id must be exactly 20 bytes");
+
+        std::vector<uint8_t> handshake(68);
+
+        handshake[0] = 19;
+        memcpy(handshake.data() + 1,  "BitTorrent protocol", 19);
+        memset(handshake.data() + 20, 0, 8);
+        memcpy(handshake.data() + 28, torrent.info_hash.data(), 20);
+        memcpy(handshake.data() + 48, peer_id.data(), 20);
+
+        return handshake;
+    }
+}
 
 int build_listen_fd(uint16_t port) {
     int fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -146,53 +166,27 @@ void PeerManager::accept_new() {
 // recv() is capped at exactly what is missing so that anything the peer
 // pipelined behind the handshake (usually its bitfield) stays in the kernel
 // buffer and is picked up by the normal read path on the next poll.
-PeerManager::InboundResult PeerManager::advance_inbound(PendingInbound& p, std::vector<PeerEvent>& out) {
+PeerManager::HandshakeResult PeerManager::advance_inbound(PendingInbound& p, std::vector<PeerEvent>& out) {
     ssize_t n = recv(p.sockfd, p.buffer.data() + p.received, 68 - p.received, 0);
 
     if (n < 0) {
         if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
-            return InboundResult::Keep;
-        return InboundResult::Drop;
+            return HandshakeResult::Keep;
+        return HandshakeResult::Drop;
     }
-    if (n == 0) return InboundResult::Drop;   // peer hung up
+    if (n == 0) return HandshakeResult::Drop;   // peer hung up
 
     p.received += static_cast<size_t>(n);
-    if (p.received < 68) return InboundResult::Keep;
+    if (p.received < 68) return HandshakeResult::Keep;
 
-    if (p.buffer[0] != 19 ||
-        std::memcmp(p.buffer.data() + 1, "BitTorrent protocol", 19) != 0) {
-        log(LogLevel::Debug, "inbound {}: bad protocol header", p.peer.host);
-        return InboundResult::Drop;
-    }
-    if (std::memcmp(p.buffer.data() + 28, torrent_.info_hash.data(), 20) != 0) {
-        log(LogLevel::Debug, "inbound {}: info hash mismatch", p.peer.host);
-        return InboundResult::Drop;
-    }
-    // We advertise ourselves to trackers, so trackers hand our address back to
-    // us; without this a client happily connects to itself.
-    if (std::memcmp(p.buffer.data() + 48, peer_id_.data(), 20) == 0) {
-        log(LogLevel::Debug, "inbound {}: that is us, dropping", p.peer.host);
-        return InboundResult::Drop;
-    }
+    if (!verify_handshake(p.buffer, p.peer)) return HandshakeResult::Drop;
 
-    PeerConnection c;
-    c.id         = next_id_++;
-    c.sockfd     = p.sockfd;
-    c.peer       = p.peer;
-    c.has_pieces = Bitfield(piece_count_);
-
-    // Our reply goes through the same write_buffer as everything else, so a
-    // partial send is handled by the POLLOUT path rather than blocking here.
-    queue(c, build_handshake(torrent_, peer_id_));
-
-    const uint32_t id = c.id;
-    conns_.emplace(id, std::move(c));
-    out.push_back({.type = PeerEvent::Joined, .peer_id = id, .block = {}, .req = {}});
-
+    const uint32_t id = promote(p.sockfd, p.peer, out);
+    queue(conns_.at(id), build_handshake(torrent_, peer_id_));
     log(LogLevel::Debug, "handshake ok (inbound): {}:{}", p.peer.host, p.peer.port);
 
     p.sockfd = -1;   // ownership moved into conns_; caller must not close it
-    return InboundResult::Promoted;
+    return HandshakeResult::Promoted;
 }
 
 void PeerManager::expire_inbound(std::chrono::seconds timeout) {
@@ -241,7 +235,7 @@ std::vector<PeerEvent> PeerManager::handle_events(std::span<pollfd> pfds) {
     expire_inbound(std::chrono::seconds(15));
     const bool listening = listen_fd_ >= 0;
     // 1. new connections
-    if (listening && (pfds[0].revents & POLLIN))
+    if (const bool listening = listen_fd_ >= 0; listening && (pfds[0].revents & POLLIN))
         accept_new();
 
     // 2. handshakes in progress. Walked by index because advance_inbound may
@@ -260,13 +254,13 @@ std::vector<PeerEvent> PeerManager::handle_events(std::span<pollfd> pfds) {
                 continue;
             }
 
-            InboundResult r = InboundResult::Drop;
+            HandshakeResult r = HandshakeResult::Drop;
             if (rev & (POLLIN | POLLERR | POLLHUP))
                 r = advance_inbound(p, events);
 
-            if (r == InboundResult::Keep) {
+            if (r == HandshakeResult::Keep) {
                 still_pending.push_back(std::move(p));
-            } else if (r == InboundResult::Drop) {
+            } else if (r == HandshakeResult::Drop) {
                 if (p.sockfd >= 0) close(p.sockfd);
             }
             // Promoted: fd now owned by conns_, do not close, do not keep
@@ -297,7 +291,7 @@ std::vector<PeerEvent> PeerManager::handle_events(std::span<pollfd> pfds) {
                     log(LogLevel::Debug, "peer {} dropped: send failed: {}",
                         id, strerror(errno));
                     to_drop.push_back(id);
-                    continue;  // socket is gone; don't try to read from it
+                    continue;
                 }
             } else {
                 c.write_buffer.erase(c.write_buffer.begin(),
@@ -533,4 +527,34 @@ void PeerManager::queue(PeerConnection& c, const std::vector<uint8_t>& msg) {
 void PeerManager::apply_availability(const Bitfield& bf, int delta) {
     for (uint32_t i = 0; i < piece_frequency_.size(); ++i)
         if (bf.get(i)) piece_frequency_[i] += delta;
+}
+
+bool PeerManager::verify_handshake(const std::array<uint8_t, 68>& hs, const Peer& peer) const {
+    if (hs[0] != 19 || std::memcmp(hs.data() + 1, "BitTorrent protocol", 19) != 0) {
+        log(LogLevel::Debug, "{}: bad protocol header", peer.host);
+        return false;
+    }
+    if (std::memcmp(hs.data() + 28, torrent_.info_hash.data(), 20) != 0) {
+        log(LogLevel::Debug, "{}: info hash mismatch", peer.host);
+        return false;
+    }
+    // Trackers hand our own address back to us; without this we'd connect to ourselves.
+    if (std::memcmp(hs.data() + 48, peer_id_.data(), 20) == 0) {
+        log(LogLevel::Debug, "{}: that is us, dropping", peer.host);
+        return false;
+    }
+    return true;
+}
+
+uint32_t PeerManager::promote(int fd, const Peer& peer, std::vector<PeerEvent>& out) {
+    PeerConnection c;
+    c.id         = next_id_++;
+    c.sockfd     = fd;
+    c.peer       = peer;
+    c.has_pieces = Bitfield(piece_count_);
+
+    const uint32_t id = c.id;
+    conns_.emplace(id, std::move(c));
+    out.push_back({.type = PeerEvent::Joined, .peer_id = id, .block = {}, .req = {}});
+    return id;
 }

@@ -76,7 +76,7 @@ public:
     bool   listening()   const { return listen_fd_ >= 0; }
 
 private:
-    enum class InboundResult { Keep, Drop, Promoted };
+    enum class HandshakeResult { Keep, Drop, Promoted };
 
     std::unordered_map<uint32_t, PeerConnection> conns_;
     std::vector<PendingInbound> inbound_;
@@ -96,8 +96,8 @@ private:
     bool   listening_  = false;
 
     void          accept_new();
-    InboundResult advance_inbound(PendingInbound& p, std::vector<PeerEvent>& out);
-    void          expire_inbound(std::chrono::seconds timeout);
+    HandshakeResult advance_inbound(PendingInbound& p, std::vector<PeerEvent>& out);
+    void            expire_inbound(std::chrono::seconds timeout);
 
     void handle_message(uint32_t peer_id, const std::vector<uint8_t>& msg,
                         std::vector<PeerEvent>& out);
