@@ -8,38 +8,31 @@ find_package(OpenSSL REQUIRED)
 
 add_executable(torrent-peer
         src/main.cpp
-        src/net/session.hpp
-        src/bencode/torrent.cpp
-        src/net/session.cpp
-        src/bencode/parser.cpp
-        src/download/piece_manager.cpp
-        src/download/piece_manager.hpp
-        src/download/disk_manager.cpp
-        src/download/disk_manager.hpp
-        src/download/peer_manager.cpp
-        src/download/peer_manager.hpp
-        src/download/tracker_manager.cpp
-        src/download/tracker_manager.hpp
+        src/metainfo/parser.cpp
+        src/metainfo/torrent.cpp
+        src/runtime/session.cpp
+        src/runtime/managers/disk_manager.cpp
+        src/runtime/managers/peer_manager.cpp
+        src/runtime/managers/piece_manager.cpp
+        src/runtime/managers/tracker_manager.cpp
 )
 target_include_directories(torrent-peer PRIVATE src)
 target_link_libraries(torrent-peer PRIVATE OpenSSL::Crypto)
 
 add_executable(tracker_probe
-        src/tools/tracker_probe.cpp
-        src/download/tracker_manager.cpp
-        src/bencode/parser.cpp
-        src/bencode/torrent.cpp
+        tools/tracker_probe.cpp
+        src/metainfo/parser.cpp
+        src/metainfo/torrent.cpp
+        src/runtime/managers/tracker_manager.cpp
 )
 target_include_directories(tracker_probe PRIVATE src)
 target_link_libraries(tracker_probe PRIVATE OpenSSL::Crypto)
 
 add_executable(peer_probe
-        src/tools/peer_probe.cpp
-        src/download/peer_manager.hpp
-        src/download/peer_manager.cpp
-        src/bencode/torrent.hpp
-        src/bencode/torrent.cpp
-        src/bencode/parser.cpp
+        tools/peer_probe.cpp
+        src/metainfo/parser.cpp
+        src/metainfo/torrent.cpp
+        src/runtime/managers/peer_manager.cpp
 )
 target_include_directories(peer_probe PRIVATE src)
 target_link_libraries(peer_probe PRIVATE OpenSSL::Crypto)

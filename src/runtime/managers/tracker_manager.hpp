@@ -9,7 +9,7 @@
 #include <poll.h>
 #include <span>
 
-#include "bencode/torrent.hpp"
+#include "metainfo/torrent.hpp"
 #include "core/types.hpp"
 
 constexpr uint64_t BITTORRENT_PROTOCOL = 0x41727101980;

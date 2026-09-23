@@ -6,9 +6,9 @@
 #include <iostream>
 #include <sstream>
 #include <random>
-#include "bencode/torrent.hpp"
+#include "metainfo/torrent.hpp"
 #include "core/log.hpp"
-#include "download/tracker_manager.hpp"
+#include "runtime/managers/tracker_manager.hpp"
 
 static std::string generate_peer_id() {
     static constexpr char charset[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";

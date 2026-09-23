@@ -1,9 +1,10 @@
 #pragma once
 #include <atomic>
-#include "download/piece_manager.hpp"
-#include "download/peer_manager.hpp"
-#include "download/disk_manager.hpp"
-#include "download/tracker_manager.hpp"
+#include "managers/piece_manager.hpp"
+#include "managers/peer_manager.hpp"
+#include "managers/disk_manager.hpp"
+#include "managers/tracker_manager.hpp"
+#include "metainfo/torrent.hpp"
 
 class Session {
 public:

@@ -1,5 +1,5 @@
 #pragma once
-#include "bencode/torrent.hpp"
+#include "metainfo/torrent.hpp"
 
 #include <array>
 #include <chrono>

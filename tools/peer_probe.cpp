@@ -5,7 +5,7 @@
 #include <sstream>
 
 #include "core/log.hpp"
-#include "download/peer_manager.hpp"
+#include "runtime/managers/peer_manager.hpp"
 
 static std::string generate_peer_id() {
     static constexpr char charset[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";

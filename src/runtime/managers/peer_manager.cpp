@@ -8,7 +8,7 @@
 #include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
-#include "bencode/torrent.hpp"
+#include "metainfo/torrent.hpp"
 #include "core/log.hpp"
 
 namespace {

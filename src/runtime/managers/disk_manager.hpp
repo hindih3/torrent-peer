@@ -3,7 +3,7 @@
 #include <filesystem>
 #include <vector>
 
-#include "bencode/torrent.hpp"
+#include "metainfo/torrent.hpp"
 #include "core/unique_fd.hpp"
 #include "core/types.hpp"
 

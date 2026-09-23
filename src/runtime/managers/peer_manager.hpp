@@ -11,7 +11,7 @@
 #include <span>
 #include <array>
 
-#include "bencode/torrent.hpp"
+#include "metainfo/torrent.hpp"
 #include "core/bitfield.hpp"
 #include "core/types.hpp"
 
