@@ -4,7 +4,8 @@
 #include <vector>
 
 #include "bencode/torrent.hpp"
-#include "common.hpp"
+#include "core/unique_fd.hpp"
+#include "core/types.hpp"
 
 class DiskManager {
 public:
@@ -22,7 +23,7 @@ public:
 
 private:
     struct FileEntry {
-        File                  file;
+        UniqueFd              unique_fd;
         std::filesystem::path path;
         uint64_t              offset = 0;
         uint64_t              length = 0;

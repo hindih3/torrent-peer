@@ -14,7 +14,6 @@ add_executable(torrent-peer
         src/bencode/parser.cpp
         src/download/piece_manager.cpp
         src/download/piece_manager.hpp
-        src/download/common.hpp
         src/download/disk_manager.cpp
         src/download/disk_manager.hpp
         src/download/peer_manager.cpp
@@ -38,7 +37,6 @@ add_executable(peer_probe
         src/tools/peer_probe.cpp
         src/download/peer_manager.hpp
         src/download/peer_manager.cpp
-        src/bencode/utils.hpp
         src/bencode/torrent.hpp
         src/bencode/torrent.cpp
         src/bencode/parser.cpp

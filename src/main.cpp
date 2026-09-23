@@ -4,10 +4,22 @@
 #include <fstream>
 #include <sstream>
 
+#include "core/log.hpp"
 #include "net/session.hpp"
 
 static std::atomic<bool> g_shutdown{false};
 extern "C" void handle_sigint(int) { g_shutdown.store(true); }
+
+
+// #FIXME find somewhere to put this function instead of pasting it in every main
+static std::string generate_peer_id() {
+    static constexpr char charset[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+    std::mt19937 rng(std::random_device{}());
+    std::string id = "-HB0010-";
+    for (int i = 0; i < 12; ++i)
+        id += charset[rng() % 62];
+    return id;
+}
 
 int main(int argc, char** argv) {
     if (argc < 2) {

@@ -5,10 +5,19 @@
 #include <fstream>
 #include <iostream>
 #include <sstream>
-
+#include <random>
 #include "bencode/torrent.hpp"
-#include "bencode/utils.hpp"
+#include "core/log.hpp"
 #include "download/tracker_manager.hpp"
+
+static std::string generate_peer_id() {
+    static constexpr char charset[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+    std::mt19937 rng(std::random_device{}());
+    std::string id = "-HB0010-";
+    for (int i = 0; i < 12; ++i)
+        id += charset[rng() % 62];
+    return id;
+}
 
 int main(int argc, char** argv) {
     if (argc < 2) {

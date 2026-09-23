@@ -1,6 +1,5 @@
 #pragma once
 #include "bencode/torrent.hpp"
-#include "common.hpp"
 
 #include <array>
 #include <chrono>
@@ -9,6 +8,9 @@
 #include <random>
 #include <unordered_map>
 #include <vector>
+
+#include "core/types.hpp"
+#include "core/bitfield.hpp"
 
 class PieceManager {
 public:

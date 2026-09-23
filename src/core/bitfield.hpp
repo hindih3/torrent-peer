@@ -1,51 +1,9 @@
 #pragma once
 #include <cstdint>
-#include <unistd.h>
-#include <vector>
-#include <cerrno>
-#include <system_error>
-#include <cstring>
+#include <cstdio>
 #include <iostream>
-
-constexpr uint32_t BLOCK_SIZE = 16384;
-
-[[noreturn]] inline void throw_errno(const std::string& what, int err = errno) {
-    throw std::system_error(err, std::generic_category(), what);
-}
-
-struct BlockRequest {
-    uint32_t piece_index;
-    uint32_t offset;
-    uint32_t length;
-};
-
-struct Block {
-    uint32_t piece_index;
-    uint32_t offset;
-    std::vector<uint8_t> data;
-};
-
-struct CompletedPiece {
-    uint32_t index;
-    std::vector<uint8_t> data;
-};
-
-struct File {
-    int fd = -1;
-
-    File() = default;
-    explicit File(int f) : fd(f) {}
-    ~File() { if (fd >= 0) ::close(fd); }
-
-    File(const File&)            = delete;
-    File& operator=(const File&) = delete;
-
-    File(File&& o) noexcept : fd(o.fd) { o.fd = -1; }
-    File& operator=(File&& o) noexcept {
-        if (this != &o) { if (fd >= 0) ::close(fd); fd = o.fd; o.fd = -1; }
-        return *this;
-    }
-};
+#include <stdexcept>
+#include <vector>
 
 // one bit per piece, packed into bytes, MSB first.
 // Piece 0 is bit 0x80 of byte 0. Spare bits in the last byte must be zero.
@@ -99,28 +57,4 @@ public:
 private:
     uint32_t             bits_ = 0;
     std::vector<uint8_t> bytes_;
-};
-
-struct Peer {
-    std::string host;
-    std::string port;
-};
-
-struct PeerConnection {
-    uint32_t id;
-
-    int sockfd;
-    Peer peer;
-    bool am_choking      = true;
-    bool am_interested   = false;
-    bool peer_choking    = true;
-    bool peer_interested = false;
-
-    bool got_bitfield = false;
-
-    int outstanding = 0;
-
-    Bitfield             has_pieces;
-    std::vector<uint8_t> read_buffer;
-    std::vector<uint8_t> write_buffer;
 };

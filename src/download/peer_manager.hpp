@@ -1,5 +1,4 @@
 #pragma once
-#include "common.hpp"
 #include <chrono>
 #include <cstdint>
 #include <iosfwd>
@@ -8,15 +7,38 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
-#include <vector>
-#include <sys/poll.h>
+#include <poll.h>
+#include <span>
+#include <array>
+
 #include "bencode/torrent.hpp"
+#include "core/bitfield.hpp"
+#include "core/types.hpp"
 
 struct PeerEvent {
     enum Type { Unchoke, Piece, Dropped, Request, Joined } type;
     uint32_t     peer_id;
     Block        block;    // valid when type == Piece
     BlockRequest req{};    // valid when type == Request
+};
+
+struct PeerConnection {
+    uint32_t id;
+
+    int sockfd;
+    Peer peer;
+    bool am_choking      = true;
+    bool am_interested   = false;
+    bool peer_choking    = true;
+    bool peer_interested = false;
+
+    bool got_bitfield = false;
+
+    int outstanding = 0;
+
+    Bitfield             has_pieces;
+    std::vector<uint8_t> read_buffer;
+    std::vector<uint8_t> write_buffer;
 };
 
 enum MessageId : uint8_t {

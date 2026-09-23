@@ -2,6 +2,9 @@
 #include <iostream>
 #include <iomanip>
 
+#include "parser.hpp"
+#include "core/sha1.hpp"
+
 bool is_multifile(const TorrentFile& t) {
     return t.files.has_value();
 }

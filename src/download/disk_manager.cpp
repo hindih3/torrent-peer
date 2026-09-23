@@ -9,6 +9,8 @@
 #include <stdexcept>
 #include <system_error>
 
+#include "core/types.hpp"
+
 namespace fs = std::filesystem;
 
 namespace {
@@ -107,7 +109,7 @@ DiskManager::DiskManager(const TorrentFile& torrent, const fs::path& download_di
         if (fd < 0) throw_errno("open " + path.string());
 
         FileEntry entry;
-        entry.file   = File(fd);
+        entry.unique_fd   = UniqueFd(fd);
         entry.path   = path;
         entry.offset = cursor;
         entry.length = length;
@@ -150,7 +152,7 @@ void DiskManager::for_each_slice(uint64_t global_offset, uint64_t len, Op op) co
         const uint64_t file_off = global_offset + done - f.offset;
         const uint64_t n = std::min(len - done, f.length - file_off);
 
-        op(f.file.fd, done, n, file_off);
+        op(f.unique_fd.fd, done, n, file_off);
 
         done += n;
         ++index;
@@ -197,6 +199,6 @@ std::vector<uint8_t> DiskManager::read_block(uint32_t piece_index, uint32_t offs
 //flush kernel buffer
 void DiskManager::sync() const {
     for (const FileEntry& f : files_) {
-        if (::fsync(f.file.fd) < 0) throw_errno("fsync " + f.path.string());
+        if (::fsync(f.unique_fd.fd) < 0) throw_errno("fsync " + f.path.string());
     }
 }

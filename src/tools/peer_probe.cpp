@@ -1,10 +1,26 @@
 #include <poll.h>
 #include <fstream>
 #include <iostream>
+#include <random>
 #include <sstream>
+
+#include "core/log.hpp"
 #include "download/peer_manager.hpp"
 
+static std::string generate_peer_id() {
+    static constexpr char charset[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+    std::mt19937 rng(std::random_device{}());
+    std::string id = "-HB0010-";
+    for (int i = 0; i < 12; ++i)
+        id += charset[rng() % 62];
+    return id;
+}
+
 int main(int argc, char** argv) {
+    if (argc < 2) {
+        std::cerr << "usage: peer_probe <file.torrent> [seconds]\n";
+        return 1;
+    }
     g_log_level = LogLevel::Trace;
     std::ifstream f(argv[1], std::ios::binary);
     std::stringstream ss; ss << f.rdbuf();

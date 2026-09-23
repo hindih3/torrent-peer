@@ -10,11 +10,7 @@
 #include <span>
 
 #include "bencode/torrent.hpp"
-#include "bencode/utils.hpp"
-#include "common.hpp"
-// use TrackerAddress and parse_tracker_url from utils,
-// tracker.hpp relies on them too, so they can't
-// be moved until tracker_manager replaces tracker
+#include "core/types.hpp"
 
 constexpr uint64_t BITTORRENT_PROTOCOL = 0x41727101980;
 
@@ -23,6 +19,11 @@ enum TrackerEvent : uint8_t {
 };
 
 enum Reported : uint8_t { REPORTED_NOTHING, REPORTED_STARTED, REPORTED_COMPLETED };
+
+struct TrackerAddress {
+    std::string host;
+    std::string port;
+};
 
 enum class TrackerState {
     Disconnected,   // no valid connection_id; must connect

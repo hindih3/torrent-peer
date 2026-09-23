@@ -6,6 +6,8 @@
 #include <ranges>
 #include <span>
 
+#include "core/log.hpp"
+
 namespace {
 constexpr int  kPipelineDepth  = 8;                        // requests in flight per peer
 constexpr auto kRequestTimeout = std::chrono::seconds(15); // before a block goes back in the pool

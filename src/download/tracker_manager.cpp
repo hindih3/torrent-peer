@@ -8,8 +8,10 @@
 #include <utility>
 #include <vector>
 #include <algorithm>
+#include <unistd.h>
+#include <arpa/inet.h>
 
-#include "common.hpp"
+#include "core/log.hpp"
 
 namespace {
     std::chrono::seconds response_timeout(const TrackerSession& t) {
@@ -61,6 +63,34 @@ namespace {
             r.peers.push_back({ip, std::to_string(port)});
         }
         return r;
+    }
+
+    TrackerAddress parse_tracker_url(const std::string& url) {
+        const std::string prefix = "udp://";
+        if (url.substr(0, prefix.size()) != prefix)
+            throw std::runtime_error("Only UDP trackers supported: " + url);
+
+        std::string rest = url.substr(prefix.size());
+
+        size_t slash_pos = rest.find('/');
+        if (slash_pos != std::string::npos)
+            rest = rest.substr(0, slash_pos);
+
+        size_t colon = rest.rfind(':');
+        if (colon == std::string::npos)
+            throw std::runtime_error("No port in tracker URL: " + url);
+
+        return {
+            rest.substr(0, colon),
+            rest.substr(colon + 1)
+        };
+    }
+
+    int createUDPIpv4Socket() {
+        int fd = socket(AF_INET, SOCK_DGRAM, 0);
+        if (fd == -1)
+            throw std::runtime_error(std::string("socket: ") + strerror(errno));
+        return fd;
     }
 }
 

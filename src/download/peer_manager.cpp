@@ -8,8 +8,8 @@
 #include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
-#include "bencode/utils.hpp"
 #include "bencode/torrent.hpp"
+#include "core/log.hpp"
 
 namespace {
     constexpr size_t kMaxHalfOpen      = 20;    // concurrent dials, leaves room for inbound

@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cstring>
 
+#include "core/sha1.hpp"
+
 PieceManager::PieceManager(const TorrentFile& torrent) :
     torrent_(torrent),
     piece_count_(static_cast<uint32_t>(torrent.pieces.size())),
