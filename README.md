@@ -21,7 +21,7 @@ cmake --build build
 ```
 
 This builds the client at `build/torrent-peer`, plus two diagnostic tools,
-`tracker_probe` and `peer_probe` (see docs/TESTING.md).
+`tracker_probe` and `peer_probe`.
 
 Developed on Ubuntu 24.04; also works under WSL2.
 
@@ -89,7 +89,6 @@ directions and is very high volume; heavily recommend redirecting it to a file:
   harm. The info hash is computed over the original bytes, not a
   re-encoding.
 
-For an in-depth explanation of design decisions: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
 ## Limitations
 
