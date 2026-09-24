@@ -7,6 +7,9 @@
 #include "core/log.hpp"
 #include "runtime/managers/peer_manager.hpp"
 
+// the function is now statically linked in session.hpp. PeerManager would usually get peer_id through
+// session, but that's not the case for this test. The easiest way is to include it in 3 different files,
+// which is kind of unwieldy, but I'm also too tired to change that at the moment.
 static std::string generate_peer_id() {
     static constexpr char charset[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
     std::mt19937 rng(std::random_device{}());

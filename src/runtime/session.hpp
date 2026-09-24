@@ -10,7 +10,7 @@ class Session {
 public:
     Session(const TorrentFile& torrent, std::vector<Peer> initial_peers,
         const std::filesystem::path& download_dir,
-        const std::string& peer_id, uint16_t listen_port, bool use_trackers);
+        uint16_t listen_port, bool use_trackers);
     void run(const std::atomic<bool>& shutdown);
 
 private:
@@ -21,6 +21,7 @@ private:
     void on_request(const PeerEvent &ev, uint64_t &up_since);
 
     const TorrentFile& torrent_;
+    const std::string peer_id_;
 
     DiskManager disk_;
     PieceManager pieces_;

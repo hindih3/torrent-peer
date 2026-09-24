@@ -9,23 +9,33 @@
 #include "core/log.hpp"
 
 namespace {
-constexpr int  kPipelineDepth  = 8;                        // requests in flight per peer
-constexpr auto kRequestTimeout = std::chrono::seconds(15); // before a block goes back in the pool
+    constexpr int  kPipelineDepth  = 8;                        // requests in flight per peer
+    constexpr auto kRequestTimeout = std::chrono::seconds(15); // before a block goes back in the pool
 
-int64_t ms_since(std::chrono::steady_clock::time_point t) {
-    return std::chrono::duration_cast<std::chrono::milliseconds>(
-               std::chrono::steady_clock::now() - t).count();
-}
+    int64_t ms_since(std::chrono::steady_clock::time_point t) {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(
+                   std::chrono::steady_clock::now() - t).count();
+    }
+
+    std::string generate_peer_id() {
+        static constexpr char charset[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+        std::mt19937 rng(std::random_device{}());
+        std::string id = "-HB0010-";
+        for (int i = 0; i < 12; ++i)
+            id += charset[rng() % 62];
+        return id;
+    }
 }
 
 Session::Session(const TorrentFile& torrent, std::vector<Peer> initial_peers,
                  const std::filesystem::path& download_dir,
-                 const std::string& peer_id, uint16_t listen_port, bool use_trackers)
+                 uint16_t listen_port, bool use_trackers)
     : torrent_(torrent),
+      peer_id_(generate_peer_id()),
       disk_(torrent, download_dir),
       pieces_(torrent),
-      peers_({}, torrent, peer_id, listen_port),
-      trackers_(torrent, peer_id, listen_port),
+      peers_({}, torrent, peer_id_, listen_port),
+      trackers_(torrent, peer_id_, listen_port),
       use_trackers_(use_trackers)
 {
     peers_.add_peers(std::move(initial_peers));
