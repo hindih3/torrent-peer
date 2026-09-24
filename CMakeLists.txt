@@ -7,6 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(OpenSSL REQUIRED)
 
 add_library(torrent_peer_lib STATIC
+        src/cli/args.cpp
         src/metainfo/parser.cpp
         src/metainfo/torrent.cpp
         src/runtime/session.cpp

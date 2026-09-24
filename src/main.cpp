@@ -4,7 +4,7 @@
 #include <fstream>
 #include <sstream>
 
-#include "core/log.hpp"
+#include "cli/args.hpp"
 #include "runtime/session.hpp"
 
 static std::atomic<bool> g_shutdown{false};
@@ -22,79 +22,28 @@ static std::string generate_peer_id() {
 }
 
 int main(int argc, char** argv) {
-    if (argc < 2) {
-        std::cerr << "usage: torrent-peer <file.torrent> [download-dir] "
-                     "[--port N] [--peer host:port] [--no-tracker] "
-                     "[--log-level trace|debug|info|warn|error|off]\n";
+    args args;
+    try {
+        args = parse_args(argc, argv);
+    } catch (const std::invalid_argument& e) {
+        std::cerr << e.what() << '\n' << kUsage;
         return 1;
     }
 
-    std::filesystem::path out_dir  = "downloads";
-    uint16_t              port     = 51413;
-    bool                  use_tracker = true;
-    std::vector<Peer>     manual_peers;
-
-    if (const char* env = std::getenv("TP_LOG")) {
-        std::string_view v{env};
-        if      (v == "trace") g_log_level = LogLevel::Trace;
-        else if (v == "debug") g_log_level = LogLevel::Debug;
-        else if (v == "info")  g_log_level = LogLevel::Info;
-        else if (v == "warn")  g_log_level = LogLevel::Warn;
-        else if (v == "error") g_log_level = LogLevel::Error;
-    }
-
-    for (int i = 2; i < argc; ++i) {
-        std::string a = argv[i];
-        if (a == "--port" && i + 1 < argc) {
-            port = static_cast<uint16_t>(std::stoi(argv[++i]));
-        } else if (a == "--peer" && i + 1 < argc) {
-            std::string hp = argv[++i];
-            size_t colon = hp.rfind(':');
-            if (colon == std::string::npos) { std::cerr << "--peer wants host:port\n"; return 1; }
-            manual_peers.push_back({hp.substr(0, colon), hp.substr(colon + 1)});
-        } else if (a == "--no-tracker") {
-            use_tracker = false;
-        } else if (a == "--log-level" && i + 1 < argc) {
-            std::string lvl = argv[++i];
-            if      (lvl == "trace") g_log_level = LogLevel::Trace;
-            else if (lvl == "debug") g_log_level = LogLevel::Debug;
-            else if (lvl == "info")  g_log_level = LogLevel::Info;
-            else if (lvl == "warn")  g_log_level = LogLevel::Warn;
-            else if (lvl == "error") g_log_level = LogLevel::Error;
-            else if (lvl == "off")   g_log_level = LogLevel::Off;
-            else { std::cerr << "unknown log level: " << lvl << "\n"; return 1; }
-        } else if (!a.empty() && a[0] != '-') {
-            out_dir = a;
-        } else {
-            std::cerr << "unknown option: " << a << "\n";
-            return 1;
-        }
-    }
-
     try {
-        std::ifstream file(argv[1], std::ios::binary);
-        if (!file) {
-            std::cerr << "could not open: " << argv[1] << "\n";
-            return 1;
-        }
-
-        std::stringstream buffer;
-        buffer << file.rdbuf();
-
-        TorrentFile torrent = parse_torrent(buffer.str());
+        TorrentFile torrent = parse_torrent(read_file(args.torrent_path));
         print_torrent(torrent, true);
 
         std::string peer_id = generate_peer_id();
-        signal(SIGPIPE, SIG_IGN);
+
+        std::signal(SIGPIPE, SIG_IGN);
         std::signal(SIGINT, handle_sigint);
 
-        std::cerr << "saving to " << std::filesystem::absolute(out_dir) << "\n";
-        Session session(torrent, manual_peers, out_dir, peer_id, port, use_tracker);
+        std::cerr << "saving to " << std::filesystem::absolute(args.out_dir) << '\n';
+        Session session(torrent, args.manual_peers, args.out_dir, peer_id, args.port, args.use_tracker);
         session.run(g_shutdown);
-
-        return 0;
     } catch (const std::exception& e) {
-        std::cerr << "fatal: " << e.what() << "\n";
+        std::cerr << "fatal: " << e.what() << '\n';
         return 1;
     }
 }
