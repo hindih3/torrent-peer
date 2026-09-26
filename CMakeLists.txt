@@ -6,6 +6,21 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(OpenSSL REQUIRED)
 
+option(TP_SANITIZE "Enable ASan/UBSan" OFF)
+option(TP_ASSERTIONS "Enable libstdc++ assertions" OFF)
+
+if(TP_SANITIZE)
+    add_compile_options(
+            -fsanitize=address,undefined
+            -fno-omit-frame-pointer
+    )
+    add_link_options(-fsanitize=address,undefined)
+endif()
+
+if(TP_ASSERTIONS)
+    add_compile_options(-D_GLIBCXX_ASSERTIONS)
+endif()
+
 add_library(torrent_peer_lib STATIC
         src/cli/args.cpp
         src/metainfo/parser.cpp
@@ -23,8 +38,8 @@ target_compile_options(torrent_peer_lib PRIVATE -Wall -Wextra -Wpedantic)
 add_executable(torrent-peer src/main.cpp)
 target_link_libraries(torrent-peer PRIVATE torrent_peer_lib)
 
-add_executable(tracker_probe tools/tracker_probe.cpp)
-target_link_libraries(tracker_probe PRIVATE torrent_peer_lib)
+add_executable(tracker-probe tools/tracker_probe.cpp)
+target_link_libraries(tracker-probe PRIVATE torrent_peer_lib)
 
-add_executable(peer_probe tools/peer_probe.cpp)
-target_link_libraries(peer_probe PRIVATE torrent_peer_lib)
+add_executable(peer-probe tools/peer_probe.cpp)
+target_link_libraries(peer-probe PRIVATE torrent_peer_lib)
