@@ -228,11 +228,7 @@ std::vector<pollfd> PeerManager::build_fds() {
 std::vector<PeerEvent> PeerManager::handle_events(const std::span<pollfd> pfds) {
     std::vector<PeerEvent> events;
 
-    // 1. new connections
-    if (listen_sock_ && (pfds[0].revents & POLLIN))
-        accept_new();
-
-    // 2. handshakes in progress. Walked by index because advance_inbound may
+    // 1. handshakes in progress. Walked by index because advance_inbound may
     //    move an entry into conns_; survivors are rebuilt into a fresh vector
     //    rather than erased in place.
     if (!inbound_.empty()) {
@@ -242,7 +238,6 @@ std::vector<PeerEvent> PeerManager::handle_events(const std::span<pollfd> pfds) 
         for (size_t i = 0; i < inbound_.size(); ++i) {
             PendingInbound& p = inbound_[i];
             const short rev = pfds[inbound_at_ + i].revents;
-
             if (rev == 0) {
                 still_pending.push_back(std::move(p));
                 continue;
@@ -281,11 +276,10 @@ std::vector<PeerEvent> PeerManager::handle_events(const std::span<pollfd> pfds) 
         outbound_ = std::move(still_pending);
     }
 
-    // 3. established peers. Note conns_ may have grown in step 2; the new
+    // 2. established peers. Note conns_ may have grown in step 2; the new
     //    entries are not in pfds this round, which is fine because their
     //    handshake reply is queued and will be flushed on the next poll.
     std::vector<uint32_t> to_drop;
-
     for (size_t k = 0; k < ids_.size(); ++k) {
         const short rev = pfds[conns_at_ + k].revents;
         if (rev == 0) continue;
@@ -341,6 +335,8 @@ std::vector<PeerEvent> PeerManager::handle_events(const std::span<pollfd> pfds) 
         }
     }
 
+    // 4. dropping peers accumulated in to_drop. Rarest-first algorithm is updated through
+    //    decrementing via apply_availability
     for (uint32_t id : to_drop) {
         auto it = conns_.find(id);
         if (it == conns_.end()) continue;
@@ -355,7 +351,13 @@ std::vector<PeerEvent> PeerManager::handle_events(const std::span<pollfd> pfds) 
     expire_inbound(std::chrono::seconds(15));
     expire_outbound();
 
-    // Refill any slots freed this loop. New sockets join the next build_fds().
+    // 5. new connections. Accept only after every loop that indexes pfds has run.
+    //    DON'T add beforethe inbound_ loop, as it will increase inbound peers and
+    //    cause a mismatch with the parallel pfds vector
+    if (listen_sock_ && (pfds[0].revents & POLLIN))
+        accept_new();
+
+    // 6. Refill any slots freed this loop. New sockets join the next build_fds().
     dial_more();
 
     return events;
