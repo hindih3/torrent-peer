@@ -86,11 +86,11 @@ namespace {
         };
     }
 
-    int createUDPIpv4Socket() {
-        int fd = socket(AF_INET, SOCK_DGRAM, 0);
-        if (fd == -1)
+    UniqueFd createUDPIpv4Socket() {
+        UniqueFd sock(::socket(AF_INET, SOCK_DGRAM, 0));
+        if (!sock)
             throw std::runtime_error(std::string("socket: ") + strerror(errno));
-        return fd;
+        return sock;
     }
 }
 
@@ -131,7 +131,7 @@ std::vector<pollfd> TrackerManager::build_fds() const {
     std::vector<pollfd> pfds;
     pfds.reserve(trackers_.size());
     for (const auto& t : trackers_)
-        pfds.push_back({.fd = t.sockfd, .events = POLLIN, .revents = 0});
+        pfds.push_back({.fd = t.sock.get(), .events = POLLIN, .revents = 0});
     return pfds;
 }
 
@@ -251,27 +251,25 @@ void TrackerManager::open_socket(TrackerSession& t) {
         throw std::runtime_error("DNS resolution failed for " + t.address.host +
                                  ": " + gai_strerror(rc));
 
-    int fd = createUDPIpv4Socket();
-    fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
+    UniqueFd sock = createUDPIpv4Socket();
+    fcntl(sock.get(), F_SETFL, fcntl(sock.get(), F_GETFL, 0) | O_NONBLOCK);
 
-    if (connect(fd, res->ai_addr, res->ai_addrlen) == -1) {
-        // capture before close()
+    if (connect(sock.get(), res->ai_addr, res->ai_addrlen) == -1) {
         const int err = errno;
         freeaddrinfo(res);
-        close(fd);
         throw std::runtime_error("connect failed for " + t.address.host +
                                  ": " + std::strerror(err));
     }
     freeaddrinfo(res);
-    t.sockfd = fd;
-    log(LogLevel::Trace, "opened socket fd={} to {}:{}", fd, t.address.host, t.address.port);
+    t.sock = std::move(sock);
+    log(LogLevel::Trace, "opened socket fd={} to {}:{}", t.sock.get(), t.address.host, t.address.port);
 }
 
 void TrackerManager::fail_backoff(TrackerSession& t) {
-    if (t.sockfd >= 0) { close(t.sockfd); t.sockfd = -1; }
+    t.sock.reset();
     t.state = TrackerState::Disconnected;
     t.retries = std::min(t.retries + 1, 8);
-    auto delay = std::chrono::seconds(15 * (1 << t.retries)); // 15·2^n
+    auto delay = response_timeout(t); // 15·2^n
     t.next_action = std::chrono::steady_clock::now() + delay;
 
     log(LogLevel::Debug, "{}:{} backing off for {}s (failure #{})",
@@ -282,7 +280,7 @@ void TrackerManager::fail_backoff(TrackerSession& t) {
 }
 
 void TrackerManager::send_connect(TrackerSession& t) {
-    if (t.sockfd < 0) {
+    if (!t.sock) {
         try {
             open_socket(t);
         } catch (const std::exception& e) {
@@ -293,11 +291,10 @@ void TrackerManager::send_connect(TrackerSession& t) {
     }
 
     t.transaction_id = next_random();
-    auto packet = build_connect_request(t.transaction_id);
-    if (::send(t.sockfd, packet.data(), packet.size(), 0) < 0) {
-        const int err = errno;   // capture before fail_backoff() calls close()
+    const auto packet = build_connect_request(t.transaction_id);
+    if (::send(t.sock.get(), packet.data(), packet.size(), 0) < 0) {
         log(LogLevel::Debug, "send connect to {}:{} failed: {}",
-            t.address.host, t.address.port, std::strerror(err));
+            t.address.host, t.address.port, std::strerror(errno));
         fail_backoff(t);
         return;
     }
@@ -314,7 +311,7 @@ void TrackerManager::send_connect(TrackerSession& t) {
 // success and ignored-noise both return true (nothing for the caller to do)
 bool TrackerManager::recv_connect(TrackerSession& t) {
     uint8_t buf[16];
-    ssize_t n = ::recv(t.sockfd, buf, sizeof(buf), 0);
+    ssize_t n = ::recv(t.sock.get(), buf, sizeof(buf), 0);
     if (n < 0) {
         if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
             return true;
@@ -388,7 +385,7 @@ void TrackerManager::send_announce(TrackerSession& t) {
     auto packet = build_announce_request(t, event, peer_id_, torrent_.info_hash,
                                          listen_port_, params);
 
-    if (::send(t.sockfd, packet.data(), packet.size(), 0) < 0) {
+    if (::send(t.sock.get(), packet.data(), packet.size(), 0) < 0) {
         const int err = errno;
         log(LogLevel::Debug, "send announce to {}:{} failed: {}",
             t.address.host, t.address.port, std::strerror(err));
@@ -407,7 +404,7 @@ void TrackerManager::send_announce(TrackerSession& t) {
 // Returns false only when the caller must fail_backoff.
 bool TrackerManager::recv_announce(TrackerSession& t, std::vector<Peer>& out) {
     while (true) {
-        ssize_t n = ::recv(t.sockfd, buf_.data(), buf_.size(), 0);
+        ssize_t n = ::recv(t.sock.get(), buf_.data(), buf_.size(), 0);
         if (n < 0) {
             if (errno == EINTR) continue;
             if (errno == EAGAIN || errno == EWOULDBLOCK) return true;   // nothing left
@@ -453,7 +450,7 @@ bool TrackerManager::recv_announce(TrackerSession& t, std::vector<Peer>& out) {
 }
 
 void TrackerManager::drain(TrackerSession& t) {
-    while (::recv(t.sockfd, buf_.data(), buf_.size(), 0) >= 0) {}
+    while (::recv(t.sock.get(), buf_.data(), buf_.size(), 0) >= 0) {}
 }
 
 void TrackerManager::on_timeout(TrackerSession& t, std::chrono::steady_clock::time_point now) {

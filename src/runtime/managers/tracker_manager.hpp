@@ -11,6 +11,7 @@
 
 #include "metainfo/torrent.hpp"
 #include "core/types.hpp"
+#include "core/unique_fd.hpp"
 
 constexpr uint64_t BITTORRENT_PROTOCOL = 0x41727101980;
 
@@ -37,7 +38,7 @@ struct TrackerSession {
     TrackerAddress address;
     TrackerState state = TrackerState::Disconnected;
 
-    int sockfd = -1;
+    UniqueFd sock;
     uint64_t connection_id = 0;
     uint32_t transaction_id = 0;
     uint32_t key = 0;
