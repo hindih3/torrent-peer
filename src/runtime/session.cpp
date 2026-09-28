@@ -9,7 +9,7 @@
 #include "core/log.hpp"
 
 namespace {
-    constexpr int  kPipelineDepth  = 8;                        // requests in flight per peer
+    constexpr int  kPipelineDepth  = 32;                        // requests in flight per peer
     constexpr auto kRequestTimeout = std::chrono::seconds(15); // before a block goes back in the pool
 
     int64_t ms_since(std::chrono::steady_clock::time_point t) {
@@ -34,7 +34,7 @@ Session::Session(const TorrentFile& torrent, std::vector<Peer> initial_peers,
       peer_id_(generate_peer_id()),
       disk_(torrent, download_dir),
       pieces_(torrent),
-      peers_({}, torrent, peer_id_, listen_port),
+      peers_(torrent, peer_id_, listen_port),
       trackers_(torrent, peer_id_, listen_port),
       use_trackers_(use_trackers)
 {

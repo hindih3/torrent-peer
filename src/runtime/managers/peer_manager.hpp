@@ -12,6 +12,7 @@
 #include <array>
 
 #include "metainfo/torrent.hpp"
+#include "core/unique_fd.hpp"
 #include "core/bitfield.hpp"
 #include "core/types.hpp"
 
@@ -25,7 +26,7 @@ struct PeerEvent {
 struct PeerConnection {
     uint32_t id;
 
-    int sockfd;
+    UniqueFd sock;
     Peer peer;
     bool am_choking      = true;
     bool am_interested   = false;
@@ -49,7 +50,7 @@ enum MessageId : uint8_t {
 // An accepted socket that has not finished its handshake yet. Kept out of
 // conns_ so the peer-wire framer never sees the 68 handshake bytes.
 struct PendingInbound {
-    int                                   sockfd = -1;
+    UniqueFd                              sock;
     Peer                                  peer;
     std::array<uint8_t, 68>               buffer{};
     size_t                                received = 0;
@@ -60,25 +61,20 @@ struct PendingInbound {
 // finish, then waiting for the peer's 68-byte handshake reply.
 struct PendingOutbound {
     enum class Phase { Connecting, Handshaking } phase = Phase::Connecting;
-    int                                   sockfd = -1;
+    UniqueFd                              sock;
     Peer                                  peer;
     std::array<uint8_t, 68>               buffer{};
     size_t                                received = 0;
     std::chrono::steady_clock::time_point deadline{};
 };
 
-int build_listen_fd(uint16_t port);
 std::vector<uint8_t> build_message(uint8_t id, const std::vector<uint8_t>& payload = {});
 std::vector<uint8_t> build_request(const BlockRequest& req);
 
 class PeerManager {
 public:
-    PeerManager(std::vector<PeerConnection> conns,
-                const TorrentFile& torrent,
-                std::string peer_id,
-                uint16_t listen_port = 6881,
-                size_t max_peers = 60);
-    ~PeerManager();
+    PeerManager(const TorrentFile& torrent, std::string peer_id,
+                uint16_t listen_port, size_t max_peers = 60);
 
     PeerManager(const PeerManager&)            = delete;
     PeerManager& operator=(const PeerManager&) = delete;
@@ -109,9 +105,9 @@ public:
     // for anything new to arrive. A seeder with an open listen socket is not
     // idle just because no one is talking to it right now.
     bool   empty()       const { return conns_.empty() && inbound_.empty() && outbound_.empty()
-                                        && candidates_.empty() && listen_fd_ < 0; }
+                                        && candidates_.empty() && !listen_sock_; }
     size_t peer_count()  const { return conns_.size(); }
-    bool   listening()   const { return listen_fd_ >= 0; }
+    bool   listening()   const { return listen_sock_.valid(); }
 
 private:
     enum class HandshakeResult { Keep, Drop, Promoted };
@@ -126,7 +122,7 @@ private:
     std::string        peer_id_;
     uint32_t           piece_count_;
     uint32_t           next_id_   = 0;
-    int                listen_fd_ = -1;
+    UniqueFd           listen_sock_;
     size_t             max_peers_;
 
     std::vector<uint16_t> piece_frequency_;
@@ -135,7 +131,6 @@ private:
     size_t inbound_at_  = 0;
     size_t outbound_at_ = 0;
     size_t conns_at_   = 0;
-    bool   listening_  = false;
 
     void          accept_new();
     HandshakeResult advance_inbound(PendingInbound& p, std::vector<PeerEvent>& out);
@@ -149,7 +144,7 @@ private:
 
     [[nodiscard]] bool verify_handshake(const std::array<uint8_t, 68>& hs,
                                         const Peer& peer) const;
-    uint32_t           promote(int fd, const Peer& peer, std::vector<PeerEvent>& out);
+    uint32_t           promote(UniqueFd sock, const Peer& peer, std::vector<PeerEvent>& out);
     static std::string key(const Peer& p) { return p.host + ":" + p.port; }
 
     void handle_message(uint32_t peer_id, const std::vector<uint8_t>& msg,

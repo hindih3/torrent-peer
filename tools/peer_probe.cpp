@@ -29,7 +29,7 @@ int main(int argc, char** argv) {
     std::stringstream ss; ss << f.rdbuf();
     TorrentFile torrent = parse_torrent(ss.str());
 
-    PeerManager peers({}, torrent, generate_peer_id(), 6881);
+    PeerManager peers(torrent, generate_peer_id(), 6881);
     peers.add_peers({
         {"127.0.0.1", "7001"},   // good handshake
         {"127.0.0.1", "7001"},   // duplicate in the same batch
