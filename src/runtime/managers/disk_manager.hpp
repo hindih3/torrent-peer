@@ -23,7 +23,7 @@ public:
 
 private:
     struct FileEntry {
-        UniqueFd              unique_fd;
+        UniqueFd              file;
         std::filesystem::path path;
         uint64_t              offset = 0;
         uint64_t              length = 0;

@@ -26,7 +26,7 @@ fs::path safe_join(const fs::path& root, const std::vector<std::string>& compone
     return p;
 }
 
-void reserve(int fd, uint64_t length, const fs::path& path) {
+void reserve(const int fd, const uint64_t length, const fs::path& path) {
 #if defined(__linux__)
     if (length > 0) {
         int rc = ::posix_fallocate(fd, 0, static_cast<off_t>(length));
@@ -45,7 +45,7 @@ void reserve(int fd, uint64_t length, const fs::path& path) {
     }
 }
 
-void pwrite_all(int fd, const uint8_t* buf, uint64_t len, uint64_t offset) {
+void pwrite_all(const int fd, const uint8_t* buf, const uint64_t len, const uint64_t offset) {
     uint64_t done = 0;
     while (done < len) {
         ssize_t n = ::pwrite(fd, buf + done, len - done,
@@ -61,7 +61,7 @@ void pwrite_all(int fd, const uint8_t* buf, uint64_t len, uint64_t offset) {
     }
 }
 
-void pread_all(int fd, uint8_t* buf, uint64_t len, uint64_t offset) {
+void pread_all(const int fd, uint8_t* buf, const uint64_t len, const uint64_t offset) {
     uint64_t done = 0;
     while (done < len) {
         ssize_t n = ::pread(fd, buf + done, len - done,
@@ -105,16 +105,16 @@ DiskManager::DiskManager(const TorrentFile& torrent, const fs::path& download_di
 
         // 0644: owner can read and write
         //       everyone else can only read
-        int fd = open(path.c_str(), O_RDWR | O_CREAT, 0644);
-        if (fd < 0) throw_errno("open " + path.string());
+        UniqueFd f(::open(path.c_str(), O_RDWR | O_CREAT, 0644));
+        if (!f) throw_errno("open " + path.string());
 
         FileEntry entry;
-        entry.unique_fd   = UniqueFd(fd);
+        entry.file   = std::move(f);
         entry.path   = path;
         entry.offset = cursor;
         entry.length = length;
 
-        reserve(fd, length, path);
+        reserve(entry.file.get(), entry.length, entry.path);
         cursor += length;
 
         if (length > 0) files_.push_back(std::move(entry));
@@ -133,13 +133,13 @@ size_t DiskManager::locate(const uint64_t offset) const {
     // contrary to what I initially thought, std::lower_bound finds the first element that is
     // greater than or equal to the value, so upper_bound is plainly simpler and less bug-prone
     auto it = std::upper_bound(files_.begin(), files_.end(), offset,
-                               [](uint64_t value, const FileEntry& e) { return value < e.offset; });
+                               [](const uint64_t value, const FileEntry& e) { return value < e.offset; });
     if (it == files_.begin()) throw std::out_of_range("offset before start of torrent");
     return static_cast<size_t>(std::prev(it) - files_.begin());
 }
 
 template <typename Op>
-void DiskManager::for_each_slice(uint64_t global_offset, uint64_t len, Op op) const {
+void DiskManager::for_each_slice(const uint64_t global_offset, const uint64_t len, Op op) const {
     if (len == 0) return;
     if (global_offset + len > total_length_) {
         throw std::out_of_range("range extends past the end of the torrent");
@@ -152,7 +152,7 @@ void DiskManager::for_each_slice(uint64_t global_offset, uint64_t len, Op op) co
         const uint64_t file_off = global_offset + done - f.offset;
         const uint64_t n = std::min(len - done, f.length - file_off);
 
-        op(f.unique_fd.fd, done, n, file_off);
+        op(f.file.get(), done, n, file_off);
 
         done += n;
         ++index;
@@ -171,8 +171,8 @@ void DiskManager::write_piece(const CompletedPiece& piece) {
                    });
 }
 
-std::vector<uint8_t> DiskManager::read_block(uint32_t piece_index, uint32_t offset,
-                                             uint32_t length) const {
+std::vector<uint8_t> DiskManager::read_block(const uint32_t piece_index, const uint32_t offset,
+                                             const uint32_t length) const {
     if (piece_index >= piece_count_) throw std::out_of_range("piece index out of range");
 
     const uint64_t this_piece_len =
@@ -190,7 +190,7 @@ std::vector<uint8_t> DiskManager::read_block(uint32_t piece_index, uint32_t offs
     uint8_t* dst = out.data();
 
     for_each_slice(global_offset, length,
-                   [dst](int fd, uint64_t buf_pos, uint64_t n, uint64_t file_off) {
+                   [dst](const int fd, const uint64_t buf_pos, const uint64_t n, const uint64_t file_off) {
                        pread_all(fd, dst + buf_pos, n, file_off);
                    });
     return out;
@@ -199,6 +199,6 @@ std::vector<uint8_t> DiskManager::read_block(uint32_t piece_index, uint32_t offs
 //flush kernel buffer
 void DiskManager::sync() const {
     for (const FileEntry& f : files_) {
-        if (::fsync(f.unique_fd.fd) < 0) throw_errno("fsync " + f.path.string());
+        if (::fsync(f.file.get()) < 0) throw_errno("fsync " + f.path.string());
     }
 }
