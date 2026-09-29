@@ -93,7 +93,7 @@ cmake --build build-fuzz --target fuzz-parser
   waiting on all sockets keeps up with the swarm without any locking.
 
 - **Download strategy.** Rarest-first piece selection, based on per-piece
-  availability across connected peers, with 8 block requests pipelined per
+  availability across connected peers, with 32 block requests pipelined per
   peer so throughput isn't capped by round-trip time.
 
 - **Multi-file disk layout.** The torrent is one contiguous byte range mapped
