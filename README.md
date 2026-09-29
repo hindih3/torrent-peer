@@ -137,8 +137,6 @@ cmake --build build-fuzz --target fuzz-parser
 
 **Known issues**
 
-- Torrent metadata isn't fully validated yet: the piece count isn't checked
-  against the total length, so a malformed `.torrent` can crash the client
 - In-flight requests aren't released on choke or disconnect; they return
   to the pool only after a timeout
 - Progress isn't reported to trackers (no `completed`/`stopped` events,

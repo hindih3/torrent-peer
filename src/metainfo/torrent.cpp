@@ -5,12 +5,31 @@
 #include "parser.hpp"
 #include "core/sha1.hpp"
 
+namespace {
+    constexpr int64_t piece_length_cap = 64 * 1024 * 1024;
+
+    void validate_layout(const TorrentFile& t) {
+        if (t.length.has_value() == t.files.has_value())
+            throw std::runtime_error("info needs exactly one of 'length' or 'files'");
+        if (t.length && *t.length < 0)
+            throw std::runtime_error("negative length");
+        if (t.files) {
+            for (const auto&[length, path] : *t.files) {
+                if (length < 0)      throw std::runtime_error("negative file length");
+                if (path.empty())    throw std::runtime_error("file with empty path");
+            }
+        }
+    }
+}
+
 bool is_multifile(const TorrentFile& t) {
     return t.files.has_value();
 }
 
 std::vector<std::string> generate_pieces(const std::string& raw) {
     std::vector<std::string> pieces;
+    if (raw.size() % 20 != 0)
+        throw std::runtime_error("Pieces aren't a multiple of 20");
     for (size_t i = 0; i < raw.size(); i += 20)
         pieces.push_back(raw.substr(i, 20));
     return pieces;
@@ -96,7 +115,15 @@ TorrentFile parse_torrent(const std::string& data) {
     auto [info_start, info_end] = parser.get_info_range();
     torrent.info_hash = sha1(data, info_start, info_end - info_start);
 
+    if (torrent.piece_length <= 0 || torrent.piece_length > piece_length_cap)
+        throw std::runtime_error("piece length out of range");
+    validate_layout(torrent);
     torrent.total_length = calculate_total_length(torrent);
+
+    const uint64_t pl = torrent.piece_length;
+    const uint64_t expected = torrent.total_length / pl + (torrent.total_length % pl != 0);
+    if (torrent.pieces.size() != expected)
+        throw std::runtime_error("piece count doesn't match total length");
 
     return torrent;
 }
@@ -156,7 +183,7 @@ void print_torrent(const TorrentFile& t, bool flag) {
 
     std::cout << "Info hash: ";
     for (uint8_t b : t.info_hash)
-        std::cout << std::hex << std::setw(2) << std::setfill('0') << (int)b;
+        std::cout << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(b);
     std::cout << std::dec << "\n";
 
     std::cout << "Total length: " << t.total_length << "\n";
