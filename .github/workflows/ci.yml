@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev clang
+
+      - name: Build with ASan, UBSan and libstdc++ assertions
+        run: |
+          cmake -B build -DTP_SANITIZE=ON -DTP_ASSERTIONS=ON
+          cmake --build build -j
+
+      - name: Run tests
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Replay fuzz corpus
+        run: |
+          CXX=clang++ cmake -B build-fuzz -DTP_FUZZ=ON -DTP_BUILD_TESTS=OFF
+          cmake --build build-fuzz --target fuzz-parser -j
+          ./build-fuzz/fuzz-parser tests/corpus/parser/*
