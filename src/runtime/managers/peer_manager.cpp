@@ -1,5 +1,6 @@
 #include "peer_manager.hpp"
 
+#include <cassert>
 #include <charconv>
 #include <cstring>
 #include <fcntl.h>
@@ -236,7 +237,9 @@ std::vector<PeerEvent> PeerManager::handle_events(const std::span<pollfd> pfds) 
         still_pending.reserve(inbound_.size());
 
         for (size_t i = 0; i < inbound_.size(); ++i) {
+            assert(inbound_at_ + i < pfds.size());
             PendingInbound& p = inbound_[i];
+            assert(pfds[inbound_at_ + i].fd == p.sock.get());
             const short rev = pfds[inbound_at_ + i].revents;
             if (rev == 0) {
                 still_pending.push_back(std::move(p));
@@ -261,7 +264,9 @@ std::vector<PeerEvent> PeerManager::handle_events(const std::span<pollfd> pfds) 
         still_pending.reserve(outbound_.size());
 
         for (size_t i = 0; i < outbound_.size(); ++i) {
+            assert(outbound_at_ + i < pfds.size());
             PendingOutbound& p = outbound_[i];
+            assert(pfds[outbound_at_ + i].fd == p.sock.get());
             const short rev = pfds[outbound_at_ + i].revents;
 
             const HandshakeResult r = rev ? advance_outbound(p, rev, events)
@@ -271,7 +276,6 @@ std::vector<PeerEvent> PeerManager::handle_events(const std::span<pollfd> pfds) 
             } else if (r == HandshakeResult::Drop) {
                 known_.erase(key(p.peer));
             }
-            // Promoted: fd owned by conns_, address stays in known_
         }
         outbound_ = std::move(still_pending);
     }
@@ -281,6 +285,7 @@ std::vector<PeerEvent> PeerManager::handle_events(const std::span<pollfd> pfds) 
     //    handshake reply is queued and will be flushed on the next poll.
     std::vector<uint32_t> to_drop;
     for (size_t k = 0; k < ids_.size(); ++k) {
+        assert(conns_at_ + k < pfds.size());
         const short rev = pfds[conns_at_ + k].revents;
         if (rev == 0) continue;
 
@@ -288,6 +293,7 @@ std::vector<PeerEvent> PeerManager::handle_events(const std::span<pollfd> pfds) 
         auto it = conns_.find(id);
         if (it == conns_.end()) continue;
         PeerConnection& c = it->second;
+        assert(pfds[conns_at_ + k].fd == c.sock.get());
 
         // Drain queued writes first so the peer stays fed.
         if (rev & POLLOUT) {
@@ -335,7 +341,7 @@ std::vector<PeerEvent> PeerManager::handle_events(const std::span<pollfd> pfds) 
         }
     }
 
-    // 4. dropping peers accumulated in to_drop. Rarest-first algorithm is updated through
+    // 3. dropping peers accumulated in to_drop. Rarest-first algorithm is updated through
     //    decrementing via apply_availability
     for (uint32_t id : to_drop) {
         auto it = conns_.find(id);
@@ -348,16 +354,16 @@ std::vector<PeerEvent> PeerManager::handle_events(const std::span<pollfd> pfds) 
         events.push_back({.type = PeerEvent::Dropped, .peer_id = id, .block = {}, .req = {}});
     }
 
-    expire_inbound(std::chrono::seconds(15));
+    expire_inbound(kHandshakeTimeout);
     expire_outbound();
 
-    // 5. new connections. Accept only after every loop that indexes pfds has run.
-    //    DON'T add beforethe inbound_ loop, as it will increase inbound peers and
+    // 4. new connections. Accept only after every loop that indexes pfds has run.
+    //    DON'T add before the inbound_ loop, as it will increase inbound peers and
     //    cause a mismatch with the parallel pfds vector
     if (listen_sock_ && (pfds[0].revents & POLLIN))
         accept_new();
 
-    // 6. Refill any slots freed this loop. New sockets join the next build_fds().
+    // 5. Refill any slots freed this loop. New sockets join the next build_fds().
     dial_more();
 
     return events;
