@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <ranges>
 
 #include "core/sha1.hpp"
 
@@ -26,9 +27,9 @@ PieceManager::pick_block(const Bitfield& peer_has,
     std::vector<uint32_t> candidates;
 
     for (uint32_t i = 0; i < piece_count_; ++i) {
-        if (have_.get(i) || active_.count(i) || !peer_has.get(i)) continue;
+        if (have_.get(i) || active_.contains(i) || !peer_has.get(i)) continue;
 
-        uint16_t avail = availability[i];
+        const uint16_t avail = availability[i];
         if (avail < best) {
             best = avail;
             candidates.clear();
@@ -93,12 +94,12 @@ std::optional<BlockRequest> PieceManager::next_missing(uint32_t index, PartialPi
 }
 
 // called periodically to stop stalls
-void PieceManager::requeue_stale(std::chrono::seconds timeout) {
+void PieceManager::requeue_stale(const std::chrono::seconds timeout) {
     const auto cutoff = std::chrono::steady_clock::now() - timeout;
-    for (auto& [index, pp] : active_)
-        for (auto& slot : pp.blocks)
-            if (slot.state == BlockState::Requested && slot.sent_at < cutoff)
-                slot.state = BlockState::Missing;
+    for (auto &pp: active_ | std::views::values)
+        for (auto&[state, sent_at] : pp.blocks)
+            if (state == BlockState::Requested && sent_at < cutoff)
+                state = BlockState::Missing;
 }
 
 bool PieceManager::is_complete() const {
@@ -107,13 +108,13 @@ bool PieceManager::is_complete() const {
 
 PieceManager::PartialPiece& PieceManager::activate(uint32_t index) {
     PartialPiece pp;
-    uint64_t len = piece_size(torrent_, index);
+    const uint64_t len = piece_size(torrent_, index);
     pp.data.resize(len);
     pp.blocks.resize((len + BLOCK_SIZE - 1) / BLOCK_SIZE);
     return active_.emplace(index, std::move(pp)).first->second;
 }
 
-bool PieceManager::verify(uint32_t index, const std::vector<uint8_t>& data) const {
+bool PieceManager::verify(const uint32_t index, const std::vector<uint8_t>& data) const {
     const std::array<uint8_t, 20> digest = sha1(data.data(), data.size());
     const std::string& expected = torrent_.pieces[index];
 

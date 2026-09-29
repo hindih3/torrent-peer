@@ -4,9 +4,9 @@
 #include <charconv>
 #include <cstring>
 #include <fcntl.h>
-#include <iostream>
 #include <arpa/inet.h>
 #include <poll.h>
+#include <ranges>
 #include <sys/socket.h>
 #include <unistd.h>
 #include "metainfo/torrent.hpp"
@@ -477,7 +477,7 @@ void PeerManager::handle_message(uint32_t peer_id, const std::vector<uint8_t>& m
 
 void PeerManager::send_interested_all() {
     auto msg = build_message(MSG_INTERESTED);
-    for (auto& [id, c] : conns_) {
+    for (auto &c: conns_ | std::views::values) {
         c.am_interested = true;
         queue(c, msg);
     }
@@ -543,7 +543,7 @@ void PeerManager::broadcast_have(uint32_t index) {
     std::memcpy(payload.data(), &idx, 4);
     auto msg = build_message(MSG_HAVE, payload);
 
-    for (auto& [id, c] : conns_)
+    for (auto &c: conns_ | std::views::values)
         queue(c, msg);
 }
 
