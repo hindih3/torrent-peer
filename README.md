@@ -21,7 +21,8 @@ cmake --build build
 ```
 
 This builds the client at `build/torrent-peer`, plus two diagnostic tools,
-`tracker_probe` and `peer_probe`.
+`tracker-probe` and `peer-probe`. Without `CMAKE_BUILD_TYPE`, the build
+defaults to Debug.
 
 Developed on Ubuntu 24.04; also works under WSL2.
 
@@ -40,12 +41,31 @@ Developed on Ubuntu 24.04; also works under WSL2.
 | `--no-tracker` | Skip tracker contact and use only `--peer` addresses. |
 | `--log-level LEVEL` | `trace`, `debug`, `info` (default), `warn`, `error`, or `off`. |
 
-The log level can also be set with the `TP_LOG` environment variable; an explicit
-`--log-level` flag overrides it. `trace` prints every wire message in both
-directions and is very high volume; heavily recommend redirecting it to a file:
+`trace` prints every wire message in both
+directions and is very high volume, so redirect it to a file:
 
 ```sh
 ./build/torrent-peer file.torrent --log-level trace 2> trace.log
+```
+
+## Testing
+
+Tests run under AddressSanitizer, UndefinedBehaviorSanitizer, and libstdc++'s
+bounds checks:
+
+```sh
+cmake -B build-debug -DTP_SANITIZE=ON -DTP_ASSERTIONS=ON
+cmake --build build-debug
+ctest --test-dir build-debug --output-on-failure
+```
+
+The bencode parser also has a libFuzzer harness (requires clang). The corpus in
+`tests/corpus/parser/` holds the inputs found so far:
+
+```sh
+CXX=clang++ cmake -B build-fuzz -DTP_FUZZ=ON
+cmake --build build-fuzz --target fuzz-parser
+./build-fuzz/fuzz-parser -max_total_time=300 tests/corpus/parser/
 ```
 
 ## How it works
@@ -89,6 +109,13 @@ directions and is very high volume; heavily recommend redirecting it to a file:
   harm. The info hash is computed over the original bytes, not a
   re-encoding.
 
+- **Strict, fuzzed bencode parser.** Rejects non-canonical integers, unsorted
+  or duplicate dictionary keys, out-of-bounds string lengths, and nesting
+  deeper than 100 levels. Fuzzed with libFuzzer under ASan and UBSan.
+
+- **RAII resource ownership.** Every socket and file descriptor is owned by a
+  move-only wrapper, so nothing can leak or be closed twice, and there are no
+  manual `close()` calls outside it.
 
 ## Limitations
 
@@ -109,6 +136,8 @@ directions and is very high volume; heavily recommend redirecting it to a file:
 
 **Known issues**
 
+- Torrent metadata isn't fully validated yet: the piece count isn't checked
+  against the total length, so a malformed `.torrent` can crash the client
 - In-flight requests aren't released on choke or disconnect; they return
   to the pool only after a timeout
 - Progress isn't reported to trackers (no `completed`/`stopped` events,
@@ -116,7 +145,6 @@ directions and is very high volume; heavily recommend redirecting it to a file:
 - No keep-alives are sent and idle peers are never timed out
 - A peer's request queue and write buffer are unbounded
 - DNS resolution blocks the event loop
-- The bencode parser has no nesting-depth limit
 
 ## References
 

@@ -3,11 +3,19 @@ project(torrent-peer CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE Debug CACHE STRING "Build type" FORCE)
+endif()
 
 find_package(OpenSSL REQUIRED)
 
 option(TP_SANITIZE "Enable ASan/UBSan" OFF)
 option(TP_ASSERTIONS "Enable libstdc++ assertions" OFF)
+option(TP_BUILD_TESTS "Build unit and regression tests" ON)
+option(TP_FUZZ "Build libFuzzer harness (clang only)" OFF)
 
 if(TP_SANITIZE)
     add_compile_options(
@@ -43,3 +51,18 @@ target_link_libraries(tracker-probe PRIVATE torrent_peer_lib)
 
 add_executable(peer-probe tools/peer_probe.cpp)
 target_link_libraries(peer-probe PRIVATE torrent_peer_lib)
+
+if(TP_BUILD_TESTS)
+    enable_testing()
+
+    add_executable(test-parser tests/test_parser.cpp)
+    target_link_libraries(test-parser PRIVATE torrent_peer_lib)
+    add_test(NAME parser COMMAND test-parser)
+endif()
+
+if(TP_FUZZ)
+    add_executable(fuzz-parser tests/fuzz_parser.cpp src/metainfo/parser.cpp)
+    target_include_directories(fuzz-parser PRIVATE src)
+    target_compile_options(fuzz-parser PRIVATE -fsanitize=fuzzer,address,undefined)
+    target_link_options(fuzz-parser PRIVATE -fsanitize=fuzzer,address,undefined)
+endif()

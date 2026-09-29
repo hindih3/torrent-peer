@@ -60,7 +60,7 @@ Bencode_value Bencode_parser::parse_int() {
     if (ec != std::errc{} || ptr != last)
         throw std::runtime_error("Invalid integer");
     ++pos_;    // skip 'e'
-    return {value};
+    return Bencode_value(value);
 }
 
 Bencode_value Bencode_parser::parse_string() {
