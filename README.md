@@ -1,4 +1,5 @@
 # torrent-peer
+![CI](https://github.com/hindih3/torrent-peer/actions/workflows/ci.yml/badge.svg)
 
 **torrent-peer** is a BitTorrent client written from scratch in C++20, with
 no dependencies beyond OpenSSL for SHA-1. The bencode parser, UDP tracker
