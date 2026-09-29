@@ -410,6 +410,11 @@ void PeerManager::handle_message(uint32_t peer_id, const std::vector<uint8_t>& m
             std::memcpy(&index, payload, 4);
             index = ntohl(index);
             if (index >= c.has_pieces.size()) throw std::runtime_error("have out of range");
+
+            if (c.has_pieces.get(index)) {
+                log(LogLevel::Debug, "peer {} piece {} already registered, ignoring", peer_id, index);
+                break;
+            }
             log(LogLevel::Trace, "peer {} <- have piece {}", peer_id, index);
             c.has_pieces.set(index);
             ++piece_frequency_[index];
