@@ -106,6 +106,13 @@ bool PieceManager::is_complete() const {
     return have_count_ == piece_count_;
 }
 
+bool PieceManager::recheck(const uint32_t index, const std::vector<uint8_t>& data) {
+    if (!verify(index, data)) return false;
+    have_.set(index);
+    ++have_count_;
+    return true;
+}
+
 PieceManager::PartialPiece& PieceManager::activate(uint32_t index) {
     PartialPiece pp;
     const uint64_t len = piece_size(torrent_, index);

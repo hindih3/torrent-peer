@@ -29,6 +29,7 @@ public:
     void requeue_stale(std::chrono::seconds timeout);
 
     bool is_complete() const;
+    bool recheck(uint32_t index, const std::vector<uint8_t>& data);
 
     const Bitfield& have_bitfield() const { return have_; }
     bool have_piece(uint32_t index) const { return have_.get(index); }

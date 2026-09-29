@@ -30,6 +30,10 @@ Session::Session(const TorrentFile& torrent, std::vector<Peer> initial_peers,
       trackers_(torrent, peer_id_, listen_port),
       use_trackers_(use_trackers)
 {
+    for (uint32_t i = 0; i < pieces_.total(); ++i)
+        pieces_.recheck(i, disk_.read_block(i, 0, piece_size(torrent_, i)));
+    log(LogLevel::Debug, "recheck: {}/{}", pieces_.completed(), pieces_.total());
+
     peers_.add_peers(std::move(initial_peers));
 }
 
