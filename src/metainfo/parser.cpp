@@ -183,8 +183,8 @@ void print_value(const Bencode_value& val, std::ostream& os, int indent) {
             os << '"' << s << '"';
         } else {
             os << "<hex:";
-            for (unsigned char c : s) {
-                os << std::hex << std::setw(2) << std::setfill('0') << (int)c;
+            for (const unsigned char c : s) {
+                os << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(c);
             }
             os << ">";
             os << std::dec;
