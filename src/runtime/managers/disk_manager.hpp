@@ -9,9 +9,8 @@
 
 class DiskManager {
 public:
-
-    DiskManager(const TorrentFile& torrent,
-                const std::filesystem::path& download_dir = std::filesystem::current_path());
+    explicit DiskManager(const TorrentFile& torrent,
+                         const std::filesystem::path& download_dir = std::filesystem::current_path());
 
     void write_piece(const CompletedPiece& piece);
 

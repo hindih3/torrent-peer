@@ -14,69 +14,68 @@
 namespace fs = std::filesystem;
 
 namespace {
-fs::path safe_join(const fs::path& root, const std::vector<std::string>& components) {
-    fs::path p = root;
-    for (const auto& c : components) {
-        if (c.empty() || c == "." || c == ".." ||
-            c.find('/') != std::string::npos || c.find('\\') != std::string::npos) {
-            throw std::runtime_error("unsafe path component in torrent: '" + c + "'");
+    fs::path safe_join(const fs::path& root, const std::vector<std::string>& components) {
+        fs::path p = root;
+        for (const auto& c : components) {
+            if (c.empty() || c == "." || c == ".." ||
+                c.find('/') != std::string::npos || c.find('\\') != std::string::npos) {
+                throw std::runtime_error("unsafe path component in torrent: '" + c + "'");
+            }
+            p /= c;
         }
-        p /= c;
+        return p;
     }
-    return p;
-}
 
-void reserve(const int fd, const uint64_t length, const fs::path& path) {
-#if defined(__linux__)
-    if (length > 0) {
-        int rc = ::posix_fallocate(fd, 0, static_cast<off_t>(length));
-        if (rc == 0) return;
-        if (rc != EOPNOTSUPP && rc != EINVAL && rc != ENOSYS) {
-            throw_errno("posix_fallocate " + path.string(), rc);
+    void reserve(const int fd, const uint64_t length, const fs::path& path) {
+    #if defined(__linux__)
+        if (length > 0) {
+            int rc = ::posix_fallocate(fd, 0, static_cast<off_t>(length));
+            if (rc == 0) return;
+            if (rc != EOPNOTSUPP && rc != EINVAL && rc != ENOSYS) {
+                throw_errno("posix_fallocate " + path.string(), rc);
+            }
+        }
+    #endif
+        // posix_fallocate offers a strong guarantee that the full memory will be reserved
+        // ftruncate only creates a sparse file; blocks are only allocated when written to
+        // with ftruncuate, a download will fail hours in if the disk space gets full when writing
+
+        if (ftruncate(fd, static_cast<off_t>(length)) < 0) {
+            throw_errno("ftruncate " + path.string());
         }
     }
-#endif
-    // posix_fallocate offers a strong guarantee that the full memory will be reserved
-    // ftruncate only creates a sparse file; blocks are only allocated when written to
-    // with ftruncuate, a download will fail hours in if the disk space gets full when writing
 
-    if (ftruncate(fd, static_cast<off_t>(length)) < 0) {
-        throw_errno("ftruncate " + path.string());
-    }
-}
+    void pwrite_all(const int fd, const uint8_t* buf, const uint64_t len, const uint64_t offset) {
+        uint64_t done = 0;
+        while (done < len) {
+            ssize_t n = ::pwrite(fd, buf + done, len - done,
+                                 static_cast<off_t>(offset + done));
+            if (n < 0) {
+                if (errno == EINTR) continue;
+                throw_errno("pwrite");
+            }
 
-void pwrite_all(const int fd, const uint8_t* buf, const uint64_t len, const uint64_t offset) {
-    uint64_t done = 0;
-    while (done < len) {
-        ssize_t n = ::pwrite(fd, buf + done, len - done,
-                             static_cast<off_t>(offset + done));
-        if (n < 0) {
-            if (errno == EINTR) continue;
-            throw_errno("pwrite");
+            // should never happen, but protects against infinite looping
+            if (n == 0) throw std::runtime_error("pwrite wrote 0 bytes");
+            done += static_cast<uint64_t>(n);
         }
-
-        // should never happen, but protects against infinite looping
-        if (n == 0) throw std::runtime_error("pwrite wrote 0 bytes");
-        done += static_cast<uint64_t>(n);
     }
-}
 
-void pread_all(const int fd, uint8_t* buf, const uint64_t len, const uint64_t offset) {
-    uint64_t done = 0;
-    while (done < len) {
-        ssize_t n = ::pread(fd, buf + done, len - done,
-                            static_cast<off_t>(offset + done));
-        if (n < 0) {
-            if (errno == EINTR) continue;
-            throw_errno("pread");
+    void pread_all(const int fd, uint8_t* buf, const uint64_t len, const uint64_t offset) {
+        uint64_t done = 0;
+        while (done < len) {
+            ssize_t n = ::pread(fd, buf + done, len - done,
+                                static_cast<off_t>(offset + done));
+            if (n < 0) {
+                if (errno == EINTR) continue;
+                throw_errno("pread");
+            }
+
+            // 0 means EOF, either the file is truncated/corrupted or the args are wrong
+            if (n == 0) throw std::runtime_error("unexpected EOF while reading");
+            done += static_cast<uint64_t>(n);
         }
-
-        // 0 means EOF, either the file is truncated/corrupted or the args are wrong
-        if (n == 0) throw std::runtime_error("unexpected EOF while reading");
-        done += static_cast<uint64_t>(n);
     }
-}
-
 }
 
 DiskManager::DiskManager(const TorrentFile& torrent, const fs::path& download_dir)
