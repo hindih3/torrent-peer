@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(torrent-peer CXX)
+project(torrent-peer VERSION 0.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -39,6 +39,12 @@ add_library(torrent_peer_lib STATIC
         src/runtime/managers/piece_manager.cpp
         src/runtime/managers/tracker_manager.cpp
 )
+target_compile_definitions(torrent_peer_lib PUBLIC
+        TP_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
+        TP_VERSION_MINOR=${PROJECT_VERSION_MINOR}
+        TP_VERSION_PATCH=${PROJECT_VERSION_PATCH}
+        TP_VERSION="${PROJECT_VERSION}")
+
 target_include_directories(torrent_peer_lib PUBLIC src)
 target_link_libraries(torrent_peer_lib PRIVATE OpenSSL::Crypto)
 target_compile_options(torrent_peer_lib PRIVATE -Wall -Wextra -Wpedantic)

@@ -8,18 +8,10 @@
 #include <random>
 #include "metainfo/torrent.hpp"
 #include "core/log.hpp"
+#include "core/peer_id.hpp"
 #include "runtime/managers/tracker_manager.hpp"
 
-// the function is now statically linked in session.hpp. TrackerManager would usually get peer_id through
-// session, but that's not the case for this test.
-static std::string generate_peer_id() {
-    static constexpr char charset[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-    std::mt19937 rng(std::random_device{}());
-    std::string id = "-HB0010-";
-    for (int i = 0; i < 12; ++i)
-        id += charset[rng() % 62];
-    return id;
-}
+
 
 int main(int argc, char** argv) {
     if (argc < 2) {

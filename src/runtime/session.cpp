@@ -7,6 +7,7 @@
 #include <span>
 
 #include "core/log.hpp"
+#include "core/peer_id.hpp"
 
 namespace {
     constexpr int  kPipelineDepth  = 32;                        // requests in flight per peer
@@ -15,15 +16,6 @@ namespace {
     int64_t ms_since(std::chrono::steady_clock::time_point t) {
         return std::chrono::duration_cast<std::chrono::milliseconds>(
                    std::chrono::steady_clock::now() - t).count();
-    }
-
-    std::string generate_peer_id() {
-        static constexpr char charset[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-        std::mt19937 rng(std::random_device{}());
-        std::string id = "-HB0010-";
-        for (int i = 0; i < 12; ++i)
-            id += charset[rng() % 62];
-        return id;
     }
 }
 
