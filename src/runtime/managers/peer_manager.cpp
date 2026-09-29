@@ -593,7 +593,7 @@ bool PeerManager::start_dial(const Peer& peer) {
     }
     addr.sin_port = htons(port);
 
-    UniqueFd sock(::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0));
+    UniqueFd sock(::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0));
     if (!sock) {
         log(LogLevel::Warn, "outbound socket() failed: {}", strerror(errno));
         return false;
