@@ -1,14 +1,18 @@
-*.txt
+# build output
+build*/
+cmake-build-*/
+
+# IDE
+.idea/
+
+# local test data
 *.torrent
 *.log
-.idea/
-cmake-build-*/
-build/
-cmake-build-debug/
-idea/
+/downloads/
+/test/downloads/
 
-build-fuzz/
+# fuzzing
+/corpus/
 crash-*
 leak-*
 timeout-*
-/corpus/
