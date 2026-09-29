@@ -417,8 +417,8 @@ void PeerManager::handle_message(uint32_t peer_id, const std::vector<uint8_t>& m
         }
 
         case MSG_BITFIELD: {
-            if (c.got_bitfield) break; // throwing and dropping the peer would be too harsh IMO
-            c.got_bitfield = true;
+            if (c.got_bitfield) break; // dropping the peer would be valid, but this
+            c.got_bitfield = true;     // lenient implementation simply ignores it
 
             std::vector<uint8_t> raw(payload, payload + payload_len);
             c.has_pieces = Bitfield::from_bytes(raw, c.has_pieces.size());

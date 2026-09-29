@@ -151,7 +151,7 @@ void Session::on_request(const PeerEvent& ev, uint64_t& up_since) {
     if (!pieces_.have_piece(ev.req.piece_index)) {
         log(LogLevel::Debug, "peer {} requested unavailable piece {}; ignoring",
             ev.peer_id, ev.req.piece_index);
-        return;                       // <-- was `continue`
+        return;
     }
     try {
         auto data = disk_.read_block(ev.req.piece_index, ev.req.offset, ev.req.length);
