@@ -5,8 +5,8 @@
 #include <charconv>
 #include <system_error>
 
-Bencode_value Bencode_parser::parse() {
-    Bencode_value value = parse_value();
+BencodeValue Bencode_parser::parse() {
+    BencodeValue value = parse_value();
 
     if (pos_ != data_.size())
         throw std::runtime_error("Invalid extra data");
@@ -14,7 +14,7 @@ Bencode_value Bencode_parser::parse() {
     return value;
 }
 
-Bencode_value Bencode_parser::parse_value() {
+BencodeValue Bencode_parser::parse_value() {
     if (pos_ >= data_.size())
         throw std::runtime_error("Unexpected end of input");
 
@@ -27,7 +27,7 @@ Bencode_value Bencode_parser::parse_value() {
     throw std::runtime_error("Invalid bencode value");
 }
 
-Bencode_value Bencode_parser::parse_int() {
+BencodeValue Bencode_parser::parse_int() {
     ++pos_;    // skip 'i'
     const size_t start = pos_;
 
@@ -60,19 +60,19 @@ Bencode_value Bencode_parser::parse_int() {
     if (ec != std::errc{} || ptr != last)
         throw std::runtime_error("Invalid integer");
     ++pos_;    // skip 'e'
-    return Bencode_value(value);
+    return BencodeValue(value);
 }
 
-Bencode_value Bencode_parser::parse_string() {
+BencodeValue Bencode_parser::parse_string() {
     return {read_string()};
 }
 
-Bencode_value Bencode_parser::parse_list() {
+BencodeValue Bencode_parser::parse_list() {
     if (++depth_ > max_depth)
         throw std::runtime_error("Nesting too deep");
     ++pos_;    // skip 'l'
 
-    Bencode_value::List list;
+    BencodeValue::List list;
     while (true) {
         if (pos_ >= data_.size())
             throw std::runtime_error("Unterminated list");
@@ -86,12 +86,12 @@ Bencode_value Bencode_parser::parse_list() {
     return {std::move(list)};
 }
 
-Bencode_value Bencode_parser::parse_dict() {
+BencodeValue Bencode_parser::parse_dict() {
     if (++depth_ > max_depth)
         throw std::runtime_error("Nesting too deep");
     ++pos_;                                   // skip 'd'
 
-    Bencode_value::Dict dict;
+    BencodeValue::Dict dict;
     while (true) {
         if (pos_ >= data_.size())
             throw std::runtime_error("Unterminated dict");
@@ -109,7 +109,7 @@ Bencode_value Bencode_parser::parse_dict() {
         const bool is_info = depth_ == 1 && key == "info";
         if (is_info) info_start = pos_;
 
-        Bencode_value value = parse_value();
+        BencodeValue value = parse_value();
 
         if (is_info) info_end = pos_;
 
@@ -161,7 +161,7 @@ std::string Bencode_parser::read_string() {
     return str;
 }
 
-void print_value(const Bencode_value& val, std::ostream& os, int indent) {
+void print_value(const BencodeValue& val, std::ostream& os, int indent) {
     const auto& var = val.get_variant();
     std::string padding(indent, ' ');
 
@@ -190,18 +190,18 @@ void print_value(const Bencode_value& val, std::ostream& os, int indent) {
             os << std::dec;
         }
     }
-    else if (std::holds_alternative<Bencode_value::List>(var)) {
+    else if (std::holds_alternative<BencodeValue::List>(var)) {
         os << "[\n";
-        for (const auto& item : std::get<Bencode_value::List>(var)) {
+        for (const auto& item : std::get<BencodeValue::List>(var)) {
             os << padding << "  ";
             print_value(item, os, indent + 2);
             os << "\n";
         }
         os << padding << "]";
     }
-    else if (std::holds_alternative<Bencode_value::Dict>(var)) {
+    else if (std::holds_alternative<BencodeValue::Dict>(var)) {
         os << "{\n";
-        for (const auto& [k, v] : std::get<Bencode_value::Dict>(var)) {
+        for (const auto& [k, v] : std::get<BencodeValue::Dict>(var)) {
             os << padding << "  " << k << ": ";
             print_value(v, os, indent + 2);
             os << "\n";
