@@ -99,7 +99,7 @@ std::vector<uint8_t> build_request(const BlockRequest& req) {
     std::memcpy(payload.data(),     &index,  4);
     std::memcpy(payload.data() + 4, &offset, 4);
     std::memcpy(payload.data() + 8, &length, 4);
-    return build_message(MSG_REQUEST, payload);
+    return build_message(MsgRequest, payload);
 }
 
 PeerManager::PeerManager(const TorrentFile& torrent, std::string peer_id,
@@ -389,29 +389,29 @@ void PeerManager::handle_message(uint32_t peer_id, const std::vector<uint8_t>& m
     size_t payload_len = msg.size() - 1;
 
     switch (id) {
-        case MSG_CHOKE:
+        case MsgChoke:
             log(LogLevel::Trace, "peer {} <- choke", peer_id);
             c.peer_choking = true;
             c.outstanding  = 0;
             break;
 
-        case MSG_UNCHOKE:
+        case MsgUnchoke:
             log(LogLevel::Trace, "peer {} <- unchoke", peer_id);
             c.peer_choking = false;
             out.push_back({PeerEvent::Unchoke, peer_id, {}, {}});
             break;
 
-        case MSG_INTERESTED:
+        case MsgInterested:
             log(LogLevel::Trace, "peer {} <- interested", peer_id);
             c.peer_interested = true;
             break;
 
-        case MSG_NOT_INTERESTED:
+        case MsgNotInterested:
             log(LogLevel::Trace, "peer {} <- not_interested", peer_id);
             c.peer_interested = false;
             break;
 
-        case MSG_HAVE: {
+        case MsgHave: {
             if (payload_len != 4) throw std::runtime_error("bad have");
             uint32_t index;
             std::memcpy(&index, payload, 4);
@@ -428,7 +428,7 @@ void PeerManager::handle_message(uint32_t peer_id, const std::vector<uint8_t>& m
             break;
         }
 
-        case MSG_BITFIELD: {
+        case MsgBitfield: {
             if (c.got_bitfield) break; // dropping the peer would be valid, but this
             c.got_bitfield = true;     // lenient implementation simply ignores it
 
@@ -440,7 +440,7 @@ void PeerManager::handle_message(uint32_t peer_id, const std::vector<uint8_t>& m
             break;
         }
 
-        case MSG_REQUEST: {
+        case MsgRequest: {
             if (c.am_choking) {
                 log(LogLevel::Trace, "peer {} <- request while choked; ignoring", peer_id);
                 break;
@@ -460,7 +460,7 @@ void PeerManager::handle_message(uint32_t peer_id, const std::vector<uint8_t>& m
             break;
         }
 
-        case MSG_PIECE: {
+        case MsgPiece: {
             if (payload_len < 8) throw std::runtime_error("bad piece");
             uint32_t index, begin;
             std::memcpy(&index, payload,     4);
@@ -488,7 +488,7 @@ void PeerManager::handle_message(uint32_t peer_id, const std::vector<uint8_t>& m
 }
 
 void PeerManager::send_interested_all() {
-    auto msg = build_message(MSG_INTERESTED);
+    auto msg = build_message(MsgInterested);
     for (auto &c: conns_ | std::views::values) {
         c.am_interested = true;
         queue(c, msg);
@@ -499,14 +499,14 @@ void PeerManager::send_interested(uint32_t peer_id) {
     auto it = conns_.find(peer_id);
     if (it == conns_.end()) return;
     it->second.am_interested = true;
-    queue(it->second, build_message(MSG_INTERESTED));
+    queue(it->second, build_message(MsgInterested));
 }
 
 void PeerManager::send_choke(uint32_t peer_id) {
     auto it = conns_.find(peer_id);
     if (it == conns_.end()) return;
     it->second.am_choking = true;
-    queue(it->second, build_message(MSG_CHOKE));
+    queue(it->second, build_message(MsgChoke));
 }
 
 void PeerManager::send_to(uint32_t peer_id, const std::vector<uint8_t>& msg) {
@@ -517,7 +517,7 @@ void PeerManager::send_to(uint32_t peer_id, const std::vector<uint8_t>& msg) {
 
 void PeerManager::send_bitfield(uint32_t peer_id, const Bitfield& our_have) {
     log(LogLevel::Trace, "peer {} -> bitfield ({} bytes)", peer_id, our_have.bytes().size());
-    send_to(peer_id, build_message(MSG_BITFIELD, our_have.bytes()));
+    send_to(peer_id, build_message(MsgBitfield, our_have.bytes()));
 }
 
 void PeerManager::send_piece(uint32_t peer_id, uint32_t index,
@@ -529,7 +529,7 @@ void PeerManager::send_piece(uint32_t peer_id, uint32_t index,
     std::memcpy(payload.data() + 8, data.data(), data.size());
     log(LogLevel::Trace, "peer {} -> piece {} off {} ({} bytes)",
         peer_id, index, begin, data.size());
-    send_to(peer_id, build_message(MSG_PIECE, payload));
+    send_to(peer_id, build_message(MsgPiece, payload));
 }
 
 void PeerManager::send_unchoke(uint32_t peer_id) {
@@ -537,7 +537,7 @@ void PeerManager::send_unchoke(uint32_t peer_id) {
     if (it == conns_.end()) return;
     it->second.am_choking = false;
     log(LogLevel::Trace, "peer {} -> unchoke", peer_id);
-    send_to(peer_id, build_message(MSG_UNCHOKE));
+    send_to(peer_id, build_message(MsgUnchoke));
 }
 
 void PeerManager::send_request(uint32_t peer_id, const BlockRequest& req) {
@@ -553,7 +553,7 @@ void PeerManager::broadcast_have(uint32_t index) {
     std::vector<uint8_t> payload(4);
     uint32_t idx = htonl(index);
     std::memcpy(payload.data(), &idx, 4);
-    auto msg = build_message(MSG_HAVE, payload);
+    auto msg = build_message(MsgHave, payload);
 
     for (auto &c: conns_ | std::views::values)
         queue(c, msg);

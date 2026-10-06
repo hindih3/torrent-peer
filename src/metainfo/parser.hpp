@@ -40,10 +40,10 @@ private:
     Variant value_;
 };
 
-class Bencode_parser {
+class BencodeParser {
 public:
-    explicit Bencode_parser(const std::string& input) : data_(input) {}
-    Bencode_parser(std::string&&) = delete;
+    explicit BencodeParser(const std::string& input) : data_(input) {}
+    BencodeParser(std::string&&) = delete;
 
     BencodeValue parse();
     [[nodiscard]] std::pair<size_t, size_t> get_info_range() const;
@@ -52,8 +52,8 @@ private:
     const std::string& data_;
     size_t pos_ = 0;
 
-    size_t info_start = 0;
-    size_t info_end   = 0;
+    size_t info_start_ = 0;
+    size_t info_end_   = 0;
 
     static constexpr size_t kMaxDepth = 100;
     size_t depth_ = 0;

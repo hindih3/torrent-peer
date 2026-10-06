@@ -9,13 +9,13 @@ static_assert(TP_VERSION_MAJOR < 10 && TP_VERSION_MINOR < 10 && TP_VERSION_PATCH
               "peer id encodes each version component as a single digit");
 
 inline std::string generate_peer_id() {
-    static constexpr char charset[] =
+    static constexpr char kCharset[] =
         "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
     std::mt19937 rng(std::random_device{}());
-    std::uniform_int_distribution<size_t> pick(0, sizeof(charset) - 2);
+    std::uniform_int_distribution<size_t> pick(0, sizeof(kCharset) - 2);
 
     std::string id = std::format("-TP{}{}{}0-", TP_VERSION_MAJOR, TP_VERSION_MINOR, TP_VERSION_PATCH);
     while (id.size() < 20)
-        id += charset[pick(rng)];
+        id += kCharset[pick(rng)];
     return id;
 }

@@ -355,11 +355,11 @@ bool TrackerManager::recv_connect(TrackerSession& t) {
 
 TrackerEvent TrackerManager::pending_event(const TrackerSession& t) const {
     switch (t.reported) {
-        case REPORTED_NOTHING:   return EVENT_STARTED;
-        case REPORTED_STARTED:   return download_complete_ ? EVENT_COMPLETED : EVENT_NONE;
-        case REPORTED_COMPLETED: return EVENT_NONE;
+        case ReportedNothing:   return EventStarted;
+        case ReportedStarted:   return download_complete_ ? EventCompleted : EventNone;
+        case ReportedCompleted: return EventNone;
     }
-    return EVENT_NONE;
+    return EventNone;
 }
 
 void TrackerManager::send_announce(TrackerSession& t) {
@@ -427,8 +427,8 @@ bool TrackerManager::recv_announce(TrackerSession& t, std::vector<Peer>& out) {
             return false;
         }
 
-        if (t.in_flight == EVENT_STARTED)   t.reported = REPORTED_STARTED;
-        if (t.in_flight == EVENT_COMPLETED) t.reported = REPORTED_COMPLETED;
+        if (t.in_flight == EventStarted)   t.reported = ReportedStarted;
+        if (t.in_flight == EventCompleted) t.reported = ReportedCompleted;
 
         const uint32_t interval = r.interval == 0 ? 1800u : r.interval;   // std::clamp needs all
         t.interval = std::clamp(interval, 300u, 86400u);        // 3 args the same type

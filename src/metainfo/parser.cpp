@@ -5,7 +5,7 @@
 #include <charconv>
 #include <system_error>
 
-BencodeValue Bencode_parser::parse() {
+BencodeValue BencodeParser::parse() {
     BencodeValue value = parse_value();
 
     if (pos_ != data_.size())
@@ -14,7 +14,7 @@ BencodeValue Bencode_parser::parse() {
     return value;
 }
 
-BencodeValue Bencode_parser::parse_value() {
+BencodeValue BencodeParser::parse_value() {
     if (pos_ >= data_.size())
         throw std::runtime_error("Unexpected end of input");
 
@@ -27,7 +27,7 @@ BencodeValue Bencode_parser::parse_value() {
     throw std::runtime_error("Invalid bencode value");
 }
 
-BencodeValue Bencode_parser::parse_int() {
+BencodeValue BencodeParser::parse_int() {
     ++pos_;    // skip 'i'
     const size_t start = pos_;
 
@@ -63,11 +63,11 @@ BencodeValue Bencode_parser::parse_int() {
     return BencodeValue(value);
 }
 
-BencodeValue Bencode_parser::parse_string() {
+BencodeValue BencodeParser::parse_string() {
     return {read_string()};
 }
 
-BencodeValue Bencode_parser::parse_list() {
+BencodeValue BencodeParser::parse_list() {
     if (++depth_ > kMaxDepth)
         throw std::runtime_error("Nesting too deep");
     ++pos_;    // skip 'l'
@@ -86,7 +86,7 @@ BencodeValue Bencode_parser::parse_list() {
     return {std::move(list)};
 }
 
-BencodeValue Bencode_parser::parse_dict() {
+BencodeValue BencodeParser::parse_dict() {
     if (++depth_ > kMaxDepth)
         throw std::runtime_error("Nesting too deep");
     ++pos_;                                   // skip 'd'
@@ -107,11 +107,11 @@ BencodeValue Bencode_parser::parse_dict() {
                                          : "Dictionary keys not sorted");
 
         const bool is_info = depth_ == 1 && key == "info";
-        if (is_info) info_start = pos_;
+        if (is_info) info_start_ = pos_;
 
         BencodeValue value = parse_value();
 
-        if (is_info) info_end = pos_;
+        if (is_info) info_end_ = pos_;
 
         dict.emplace_hint(dict.end(), std::move(key), std::move(value));
     }
@@ -121,11 +121,11 @@ BencodeValue Bencode_parser::parse_dict() {
     return {std::move(dict)};
 }
 
-std::pair<size_t, size_t> Bencode_parser::get_info_range() const {
-    return {info_start, info_end};
+std::pair<size_t, size_t> BencodeParser::get_info_range() const {
+    return {info_start_, info_end_};
 }
 
-std::string Bencode_parser::read_string() {
+std::string BencodeParser::read_string() {
     const size_t digits_start = pos_;
     while (pos_ < data_.size() && std::isdigit(static_cast<unsigned char>(data_[pos_])))
         ++pos_;

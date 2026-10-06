@@ -69,6 +69,19 @@ cmake --build build-fuzz --target fuzz-parser
 ./build-fuzz/fuzz-parser -max_total_time=300 tests/corpus/parser/
 ```
 
+## Development
+
+Naming and a set of bug-prone patterns are checked with clang-tidy, using the
+rules in `.clang-tidy`.
+
+```sh
+cmake -B build
+run-clang-tidy -p build -header-filter='src/.*'
+```
+
+Add `-fix` to apply the suggested changes in place. Names fixed by outside
+tools, such as `LLVMFuzzerTestOneInput`, are marked `NOLINT`.
+
 ## How it works
 
 ```

@@ -16,10 +16,10 @@
 constexpr uint64_t kBitTorrentProtocol = 0x41727101980;
 
 enum TrackerEvent : uint8_t {
-    EVENT_NONE = 0, EVENT_COMPLETED = 1, EVENT_STARTED = 2, EVENT_STOPPED = 3
+    EventNone = 0, EventCompleted = 1, EventStarted = 2, EventStopped = 3
 };
 
-enum Reported : uint8_t { REPORTED_NOTHING, REPORTED_STARTED, REPORTED_COMPLETED };
+enum Reported : uint8_t { ReportedNothing, ReportedStarted, ReportedCompleted };
 
 struct TrackerAddress {
     std::string host;
@@ -51,8 +51,8 @@ struct TrackerSession {
     std::chrono::steady_clock::time_point next_action;  // when Idle expires
     int retries = 0;
 
-    TrackerEvent in_flight = EVENT_NONE;
-    Reported     reported  = REPORTED_NOTHING;
+    TrackerEvent in_flight = EventNone;
+    Reported     reported  = ReportedNothing;
 
     uint32_t interval = 0;
     uint32_t seeders  = 0;

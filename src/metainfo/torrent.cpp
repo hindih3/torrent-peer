@@ -53,7 +53,7 @@ uint64_t piece_size(const TorrentFile& t, size_t piece_index) {
 
 TorrentFile parse_torrent(const std::string& data) {
     TorrentFile torrent;
-    Bencode_parser parser(data);
+    BencodeParser parser(data);
     BencodeValue root = parser.parse();
 
     if (!root.is_dict())

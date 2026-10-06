@@ -12,12 +12,15 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y libssl-dev clang
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev clang clang-tidy
 
       - name: Build with ASan, UBSan and libstdc++ assertions
         run: |
           cmake -B build -DTP_SANITIZE=ON -DTP_ASSERTIONS=ON
           cmake --build build -j
+
+      - name: clang-tidy
+        run: run-clang-tidy -p build -quiet -header-filter='src/.*' -warnings-as-errors='*'
 
       - name: Run tests
         run: ctest --test-dir build --output-on-failure
