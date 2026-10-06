@@ -31,7 +31,7 @@ private:
     bool use_trackers_;
     bool completed_  = false;
 
-    uint64_t downloaded_ = 0;
-    uint64_t uploaded_   = 0;
-    uint64_t verified_   = 0;
+    [[maybe_unused]] uint64_t downloaded_ = 0;
+    [[maybe_unused]] uint64_t uploaded_   = 0;
+    [[maybe_unused]] uint64_t verified_   = 0;
 };
