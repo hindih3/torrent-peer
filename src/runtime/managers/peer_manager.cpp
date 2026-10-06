@@ -154,10 +154,9 @@ void PeerManager::accept_new() {
     }
 }
 
-// An inbound peer speaks first, so the order here is the mirror of
-// handshake_peers(): read and verify their 68 bytes, then send ours.
-// recv() is capped at exactly what is missing so that anything the peer
-// pipelined behind the handshake (usually its bitfield) stays in the kernel
+// An inbound peer speaks first, so the order here is: read and verify their 68 bytes,
+// then send ours. recv() is capped at exactly what is missing so that anything the
+// peer pipelined behind the handshake (usually its bitfield) stays in the kernel
 // buffer and is picked up by the normal read path on the next poll.
 PeerManager::HandshakeResult PeerManager::advance_inbound(PendingInbound& p, std::vector<PeerEvent>& out) {
     ssize_t n = recv(p.sock.get(), p.buffer.data() + p.received, 68 - p.received, 0);
@@ -226,12 +225,16 @@ std::vector<pollfd> PeerManager::build_fds() {
     return pfds;
 }
 
+// pfds was built by build_fds() in this layout:
+//   [listen?][inbound_...][outbound_...][conns_ via ids_...]
+// Each loop below reads its slice by index, so nothing may add to
+// inbound_, outbound_ or conns_ until all indexed loops have finished
 std::vector<PeerEvent> PeerManager::handle_events(const std::span<pollfd> pfds) {
     std::vector<PeerEvent> events;
 
-    // 1. handshakes in progress. Walked by index because advance_inbound may
-    //    move an entry into conns_; survivors are rebuilt into a fresh vector
-    //    rather than erased in place.
+    // 1a. Inbound handshakes. Survivors are rebuilt into a new vector
+    //     rather than erased in place, so inbound_[i] keeps lining up
+    //     with pfds[inbound_at_ + i] for the whole loop.
     if (!inbound_.empty()) {
         std::vector<PendingInbound> still_pending;
         still_pending.reserve(inbound_.size());
@@ -259,6 +262,8 @@ std::vector<PeerEvent> PeerManager::handle_events(const std::span<pollfd> pfds) 
         inbound_ = std::move(still_pending);
     }
 
+    // 1b. Outbound connects and handshakes, same pattern as 1a.
+    //     Only outbound peers are in known_, so only they are erased on Drop.
     if (!outbound_.empty()) {
         std::vector<PendingOutbound> still_pending;
         still_pending.reserve(outbound_.size());
@@ -280,9 +285,9 @@ std::vector<PeerEvent> PeerManager::handle_events(const std::span<pollfd> pfds) 
         outbound_ = std::move(still_pending);
     }
 
-    // 2. established peers. Note conns_ may have grown in step 2; the new
-    //    entries are not in pfds this round, which is fine because their
-    //    handshake reply is queued and will be flushed on the next poll.
+    // 2. Established peers, walked via the ids_ snapshot from build_fds().
+    //    Peers promoted in step 1 aren't in ids_, so they're skipped this
+    //    round and polled from the next build_fds().
     std::vector<uint32_t> to_drop;
     for (size_t k = 0; k < ids_.size(); ++k) {
         assert(conns_at_ + k < pfds.size());
@@ -341,8 +346,9 @@ std::vector<PeerEvent> PeerManager::handle_events(const std::span<pollfd> pfds) 
         }
     }
 
-    // 3. dropping peers accumulated in to_drop. Rarest-first algorithm is updated through
-    //    decrementing via apply_availability
+    // 3. Remove dropped peers: subtract their pieces from the availability
+    //    counts used by rarest-first, forget their address so it can be
+    //    dialled again, and report a Dropped event.
     for (uint32_t id : to_drop) {
         auto it = conns_.find(id);
         if (it == conns_.end()) continue;
@@ -354,12 +360,13 @@ std::vector<PeerEvent> PeerManager::handle_events(const std::span<pollfd> pfds) 
         events.push_back({.type = PeerEvent::Dropped, .peer_id = id, .block = {}, .req = {}});
     }
 
+    // 4. Expire handshakes and connects that took too long.
     expire_inbound(kHandshakeTimeout);
     expire_outbound();
 
-    // 4. new connections. Accept only after every loop that indexes pfds has run.
-    //    DON'T add before the inbound_ loop, as it will increase inbound peers and
-    //    cause a mismatch with the parallel pfds vector
+    // 5. Accept new inbound connections. This adds to inbound_, so it must
+    //    come after every indexed loop above. The listen socket, when
+    //    present, is always pfds[0].
     if (listen_sock_ && (pfds[0].revents & POLLIN))
         accept_new();
 
@@ -445,7 +452,7 @@ void PeerManager::handle_message(uint32_t peer_id, const std::vector<uint8_t>& m
             std::memcpy(&length, payload + 8, 4);
             index = ntohl(index); begin = ntohl(begin); length = ntohl(length);
 
-            if (length > BLOCK_SIZE) throw std::runtime_error("request too large");
+            if (length > kBlockSize) throw std::runtime_error("request too large");
 
             log(LogLevel::Trace, "peer {} <- request piece {} off {} len {}",
                 peer_id, index, begin, length);

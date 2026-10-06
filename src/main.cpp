@@ -10,7 +10,7 @@ static std::atomic<bool> g_shutdown{false};
 extern "C" void handle_sigint(int) { g_shutdown.store(true); }
 
 int main(int argc, char** argv) {
-    args args;
+    Args args;
     try {
         args = parse_args(argc, argv);
     } catch (const std::invalid_argument& e) {

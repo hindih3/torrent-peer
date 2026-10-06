@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-constexpr uint32_t BLOCK_SIZE = 16384;
+constexpr uint32_t kBlockSize = 16384;
 
 struct Peer {
     std::string host;

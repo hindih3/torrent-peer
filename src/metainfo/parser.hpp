@@ -55,7 +55,7 @@ private:
     size_t info_start = 0;
     size_t info_end   = 0;
 
-    static constexpr size_t max_depth = 100;
+    static constexpr size_t kMaxDepth = 100;
     size_t depth_ = 0;
 
     BencodeValue parse_value();

@@ -128,9 +128,7 @@ DiskManager::DiskManager(const TorrentFile& torrent, const fs::path& download_di
 
 // returns index of first FileEntry behind an offset
 size_t DiskManager::locate(const uint64_t offset) const {
-
-    // contrary to what I initially thought, std::lower_bound finds the first element that is
-    // greater than or equal to the value, so upper_bound is plainly simpler and less bug-prone
+    
     auto it = std::upper_bound(files_.begin(), files_.end(), offset,
                                [](const uint64_t value, const FileEntry& e) { return value < e.offset; });
     if (it == files_.begin()) throw std::out_of_range("offset before start of torrent");

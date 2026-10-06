@@ -86,7 +86,7 @@ namespace {
         };
     }
 
-    UniqueFd createUDPIpv4Socket() {
+    UniqueFd create_udp_ipv4_socket() {
         UniqueFd sock(::socket(AF_INET, SOCK_DGRAM, 0));
         if (!sock)
             throw std::runtime_error(std::string("socket: ") + strerror(errno));
@@ -181,7 +181,7 @@ std::vector<uint8_t> TrackerManager::build_connect_request(const uint32_t transa
 
     std::vector<uint8_t> packet(16);
 
-    uint64_t protocol_id = htobe64(BITTORRENT_PROTOCOL);
+    uint64_t protocol_id = htobe64(kBitTorrentProtocol);
     uint32_t action      = htonl(0);
     uint32_t txn_id      = htonl(transaction_id);
 
@@ -251,7 +251,7 @@ void TrackerManager::open_socket(TrackerSession& t) {
         throw std::runtime_error("DNS resolution failed for " + t.address.host +
                                  ": " + gai_strerror(rc));
 
-    UniqueFd sock = createUDPIpv4Socket();
+    UniqueFd sock = create_udp_ipv4_socket();
     fcntl(sock.get(), F_SETFL, fcntl(sock.get(), F_GETFL, 0) | O_NONBLOCK);
 
     if (connect(sock.get(), res->ai_addr, res->ai_addrlen) == -1) {

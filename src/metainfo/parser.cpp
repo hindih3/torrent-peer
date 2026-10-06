@@ -68,7 +68,7 @@ BencodeValue Bencode_parser::parse_string() {
 }
 
 BencodeValue Bencode_parser::parse_list() {
-    if (++depth_ > max_depth)
+    if (++depth_ > kMaxDepth)
         throw std::runtime_error("Nesting too deep");
     ++pos_;    // skip 'l'
 
@@ -87,7 +87,7 @@ BencodeValue Bencode_parser::parse_list() {
 }
 
 BencodeValue Bencode_parser::parse_dict() {
-    if (++depth_ > max_depth)
+    if (++depth_ > kMaxDepth)
         throw std::runtime_error("Nesting too deep");
     ++pos_;                                   // skip 'd'
 

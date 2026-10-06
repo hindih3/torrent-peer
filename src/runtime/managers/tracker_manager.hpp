@@ -13,7 +13,7 @@
 #include "core/types.hpp"
 #include "core/unique_fd.hpp"
 
-constexpr uint64_t BITTORRENT_PROTOCOL = 0x41727101980;
+constexpr uint64_t kBitTorrentProtocol = 0x41727101980;
 
 enum TrackerEvent : uint8_t {
     EVENT_NONE = 0, EVENT_COMPLETED = 1, EVENT_STARTED = 2, EVENT_STOPPED = 3

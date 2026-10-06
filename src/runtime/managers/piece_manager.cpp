@@ -52,8 +52,8 @@ std::optional<CompletedPiece> PieceManager::on_block(const Block& block) {
     if (it == active_.end())                        return std::nullopt;
     PartialPiece& pp = it->second;
 
-    if (block.offset % BLOCK_SIZE != 0)             return std::nullopt;
-    uint32_t b = block.offset / BLOCK_SIZE;
+    if (block.offset % kBlockSize != 0)             return std::nullopt;
+    uint32_t b = block.offset / kBlockSize;
     if (b >= pp.blocks.size())                      return std::nullopt;
     if (block.offset + block.data.size() > pp.data.size()) return std::nullopt;
 
@@ -85,9 +85,9 @@ std::optional<BlockRequest> PieceManager::next_missing(uint32_t index, PartialPi
         pp.blocks[b].state   = BlockState::Requested;
         pp.blocks[b].sent_at = std::chrono::steady_clock::now();
 
-        uint32_t offset = b * BLOCK_SIZE;
+        uint32_t offset = b * kBlockSize;
         uint32_t length = static_cast<uint32_t>(std::min<uint64_t>(
-            BLOCK_SIZE, piece_size(torrent_, index) - offset));
+            kBlockSize, piece_size(torrent_, index) - offset));
         return BlockRequest{.piece_index = index, .offset = offset, .length = length};
     }
     return std::nullopt;
@@ -117,7 +117,7 @@ PieceManager::PartialPiece& PieceManager::activate(uint32_t index) {
     PartialPiece pp;
     const uint64_t len = piece_size(torrent_, index);
     pp.data.resize(len);
-    pp.blocks.resize((len + BLOCK_SIZE - 1) / BLOCK_SIZE);
+    pp.blocks.resize((len + kBlockSize - 1) / kBlockSize);
     return active_.emplace(index, std::move(pp)).first->second;
 }
 

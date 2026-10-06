@@ -6,7 +6,7 @@
 #include "core/sha1.hpp"
 
 namespace {
-    constexpr int64_t piece_length_cap = 64 * 1024 * 1024;
+    constexpr int64_t kPieceLengthCap = 64 * 1024 * 1024;
 
     void validate_layout(const TorrentFile& t) {
         if (t.length.has_value() == t.files.has_value())
@@ -54,17 +54,17 @@ uint64_t piece_size(const TorrentFile& t, size_t piece_index) {
 TorrentFile parse_torrent(const std::string& data) {
     TorrentFile torrent;
     Bencode_parser parser(data);
-    Bencode_value root = parser.parse();
+    BencodeValue root = parser.parse();
 
     if (!root.is_dict())
         throw std::runtime_error("Root is not a dict");
 
-    const Bencode_value::Dict& dict = root.get_dict();
+    const BencodeValue::Dict& dict = root.get_dict();
 
     auto info_it = dict.find("info");
     if (info_it == dict.end())
         throw std::runtime_error("Missing info dict");
-    const Bencode_value::Dict& info = info_it->second.get_dict();
+    const BencodeValue::Dict& info = info_it->second.get_dict();
 
     if (auto it = dict.find("announce"); it != dict.end())
         torrent.announce = it->second.get_string();
@@ -115,7 +115,7 @@ TorrentFile parse_torrent(const std::string& data) {
     auto [info_start, info_end] = parser.get_info_range();
     torrent.info_hash = sha1(data, info_start, info_end - info_start);
 
-    if (torrent.piece_length <= 0 || torrent.piece_length > piece_length_cap)
+    if (torrent.piece_length <= 0 || torrent.piece_length > kPieceLengthCap)
         throw std::runtime_error("piece length out of range");
     validate_layout(torrent);
     torrent.total_length = calculate_total_length(torrent);
