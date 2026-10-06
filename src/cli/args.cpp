@@ -30,8 +30,8 @@ namespace {
     }
 }
 
-args parse_args(int argc, char* argv[]) {
-    args args;
+Args parse_args(int argc, char* argv[]) {
+    Args args;
     std::vector<std::string_view> positional;
 
     for (int i = 1; i < argc; ++i) {

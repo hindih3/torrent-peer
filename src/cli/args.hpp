@@ -6,7 +6,7 @@
 
 #include "core/types.hpp"
 
-struct args {
+struct Args {
     std::filesystem::path torrent_path;
     std::filesystem::path out_dir = "downloads";
     uint16_t port = 51413;
@@ -14,7 +14,7 @@ struct args {
     std::vector<Peer> manual_peers;
 };
 
-args parse_args(int argc, char* argv[]);
+Args parse_args(int argc, char* argv[]);
 
 std::string read_file(const std::filesystem::path& p);
 
