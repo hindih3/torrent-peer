@@ -131,7 +131,6 @@ cmake --build build-fuzz --target fuzz-parser
 - Choking algorithm: every interested peer is unchoked
 - Endgame mode, so the last few pieces can be slow
 - `cancel` messages are ignored
-- Resume: restarting re-downloads from scratch
 - Bandwidth limits
 - POSIX only (`poll`, `pwrite`, `posix_fallocate`); works under WSL
 
