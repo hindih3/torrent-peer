@@ -7,7 +7,7 @@ static int failures = 0;
 
 static void expect_ok(const std::string& in, const char* label = nullptr) {
     try {
-        Bencode_parser p(in);
+        BencodeParser p(in);
         p.parse();
     } catch (const std::exception& e) {
         std::printf("FAIL  expected ok:   %-28s threw: %s\n", label ? label : in.c_str(), e.what());
@@ -18,7 +18,7 @@ static void expect_ok(const std::string& in, const char* label = nullptr) {
 static void expect_err(const std::string& in, const char* label = nullptr) {
     const char* shown = label ? label : in.c_str();
     try {
-        Bencode_parser p(in);
+        BencodeParser p(in);
         p.parse();
         std::printf("FAIL  expected error: %-28s parsed fine\n", shown);
         ++failures;
@@ -58,7 +58,7 @@ int main() {
     // info span: outer value only
     {
         const std::string in = "d4:infod4:infoi1eee";
-        Bencode_parser p(in);
+        BencodeParser p(in);
         p.parse();
         auto [b, e] = p.get_info_range();
         const bool good = b == 7 && e == 18;

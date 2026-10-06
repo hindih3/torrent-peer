@@ -13,3 +13,5 @@ CheckOptions:
   readability-identifier-naming.ConstexprVariablePrefix:      'k'
   readability-identifier-naming.NamespaceCase:         lower_case
   readability-identifier-naming.MacroDefinitionCase:   UPPER_CASE
+
+  readability-identifier-naming.FunctionIgnoredRegexp: '^LLVMFuzzer.*'
