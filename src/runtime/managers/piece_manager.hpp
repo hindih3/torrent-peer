@@ -56,7 +56,7 @@ private:
 
     const TorrentFile& torrent_;
     uint32_t piece_count_;
-    [[maybe_unused]] uint32_t piece_length_;
+
     Bitfield have_;
     uint64_t have_bytes_ = 0;
     uint32_t have_count_ = 0;
