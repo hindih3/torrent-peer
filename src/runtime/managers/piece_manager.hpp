@@ -33,6 +33,7 @@ public:
 
     const Bitfield& have_bitfield() const { return have_; }
     bool have_piece(uint32_t index) const { return have_.get(index); }
+    uint64_t bytes_left() const { return torrent_.total_length - have_bytes_; }
     uint32_t completed() const { return have_count_; }
     uint32_t total()     const { return piece_count_; }
     size_t   active()    const { return active_.size(); }
@@ -57,11 +58,13 @@ private:
     uint32_t piece_count_;
     [[maybe_unused]] uint32_t piece_length_;
     Bitfield have_;
+    uint64_t have_bytes_ = 0;
     uint32_t have_count_ = 0;
     std::mt19937 rng_;
 
     std::unordered_map<uint32_t, PartialPiece> active_;
 
     PartialPiece& activate(uint32_t index);
+    void mark_have(uint32_t index);
     bool verify(uint32_t index, const std::vector<uint8_t>& data) const;
 };

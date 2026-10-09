@@ -74,8 +74,7 @@ std::optional<CompletedPiece> PieceManager::on_block(const Block& block) {
 
     CompletedPiece done{block.piece_index, std::move(pp.data)};
     active_.erase(it);
-    have_.set(block.piece_index);
-    ++have_count_;
+    mark_have(block.piece_index);
     return done;
 }
 
@@ -108,9 +107,14 @@ bool PieceManager::is_complete() const {
 
 bool PieceManager::recheck(const uint32_t index, const std::vector<uint8_t>& data) {
     if (!verify(index, data)) return false;
+    mark_have(index);
+    return true;
+}
+
+void PieceManager::mark_have(const uint32_t index) {
     have_.set(index);
     ++have_count_;
-    return true;
+    have_bytes_ += piece_size(torrent_, index);
 }
 
 PieceManager::PartialPiece& PieceManager::activate(uint32_t index) {
