@@ -29,12 +29,12 @@ private:
     };
 
     [[nodiscard]] size_t locate(uint64_t offset) const;
-
     template <typename Op>
     void for_each_slice(uint64_t global_offset, uint64_t len, Op op) const;
 
     std::vector<FileEntry> files_;
-    uint64_t               piece_length_ = 0;
-    uint64_t               total_length_ = 0;
-    uint32_t               piece_count_  = 0;
+    const  TorrentFile&  torrent_;
+    uint64_t    piece_length_ = 0;
+    uint64_t    total_length_ = 0;
+    uint32_t    piece_count_  = 0;
 };

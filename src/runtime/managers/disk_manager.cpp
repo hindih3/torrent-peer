@@ -79,7 +79,8 @@ namespace {
 }
 
 DiskManager::DiskManager(const TorrentFile& torrent, const fs::path& download_dir)
-    : piece_length_(static_cast<uint64_t>(torrent.piece_length)),
+    : torrent_(torrent),
+      piece_length_(static_cast<uint64_t>(torrent.piece_length)),
       total_length_(torrent.total_length),
       piece_count_(static_cast<uint32_t>(torrent.pieces.size())) {
 
@@ -172,10 +173,7 @@ std::vector<uint8_t> DiskManager::read_block(const uint32_t piece_index, const u
                                              const uint32_t length) const {
     if (piece_index >= piece_count_) throw std::out_of_range("piece index out of range");
 
-    const uint64_t this_piece_len =
-        (piece_index == piece_count_ - 1)
-            ? total_length_ - static_cast<uint64_t>(piece_index) * piece_length_
-            : piece_length_;
+    const uint64_t this_piece_len = piece_size(torrent_, piece_index);
 
     if (static_cast<uint64_t>(offset) + length > this_piece_len)
         throw std::out_of_range("read_block range extends past the piece");
