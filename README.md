@@ -37,7 +37,7 @@ Developed on Ubuntu 24.04; also works under WSL2.
 
 | Option | Description |
 | --- | --- |
-| `--port N` | Port to listen on for inbound peers (also advertised to trackers). Default 51413. |
+| `--port N` | Port to listen on for inbound peers (1024–65535, also advertised to trackers). Default 51413. |
 | `--peer host:port` | Add a peer manually. May be repeated. Combines with tracker-discovered peers. |
 | `--no-tracker` | Skip tracker contact and use only `--peer` addresses. |
 | `--log-level LEVEL` | `trace`, `debug`, `info` (default), `warn`, `error`, or `off`. |
@@ -71,16 +71,16 @@ cmake --build build-fuzz --target fuzz-parser
 
 ## Development
 
-Naming and a set of bug-prone patterns are checked with clang-tidy, using the
-rules in `.clang-tidy`.
+Naming conventions are enforced with clang-tidy's `readability-identifier-naming`
+check, configured in `.clang-tidy`. CI runs it with warnings treated as errors.
 
 ```sh
 cmake -B build
 run-clang-tidy -p build -header-filter='src/.*'
 ```
 
-Add `-fix` to apply the suggested changes in place. Names fixed by outside
-tools, such as `LLVMFuzzerTestOneInput`, are marked `NOLINT`.
+Add `-fix` to rename offending identifiers in place. Names fixed by outside
+tools, such as `LLVMFuzzerTestOneInput`, are excluded in `.clang-tidy`.
 
 ## How it works
 
@@ -141,7 +141,7 @@ tools, such as `LLVMFuzzerTestOneInput`, are marked `NOLINT`.
 - Protocol encryption (MSE/PE)
 - IPv6
 - One torrent per process
-- Choking algorithm: every interested peer is unchoked
+- Choking algorithm: every peer is unchoked on connect
 - Endgame mode, so the last few pieces can be slow
 - `cancel` messages are ignored
 - Bandwidth limits
