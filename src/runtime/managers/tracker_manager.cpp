@@ -99,7 +99,6 @@ TrackerManager::TrackerManager(const TorrentFile& torrent,
     : torrent_(torrent),
       peer_id_(std::move(peer_id)),
       listen_port_(listen_port),
-      left_(torrent.total_length),
       rng_(std::random_device{}()),
       key_(static_cast<uint32_t>(rng_()))
 {
@@ -135,7 +134,7 @@ std::vector<pollfd> TrackerManager::build_fds() const {
     return pfds;
 }
 
-std::vector<Peer> TrackerManager::tick(std::span<const pollfd> pfds) {
+std::vector<Peer> TrackerManager::tick(std::span<const pollfd> pfds, const AnnounceParams& stats) {
     std::vector<Peer> fresh;
     if (pfds.size() != trackers_.size()) {
         log(LogLevel::Error, "tick: got {} pollfds for {} trackers", pfds.size(), trackers_.size());
@@ -158,7 +157,7 @@ std::vector<Peer> TrackerManager::tick(std::span<const pollfd> pfds) {
     }
 
     // Pass 2: timer-driven transitions, always runs
-    for (auto& t : trackers_) advance(t, now);
+    for (auto& t : trackers_) advance(t, stats, now);
 
     return fresh;
 }
@@ -362,7 +361,7 @@ TrackerEvent TrackerManager::pending_event(const TrackerSession& t) const {
     return EventNone;
 }
 
-void TrackerManager::send_announce(TrackerSession& t) {
+void TrackerManager::send_announce(TrackerSession& t, const AnnounceParams& stats) {
     const auto now = std::chrono::steady_clock::now();
 
     if (now - t.connected_at >= std::chrono::seconds(60)) {
@@ -377,13 +376,8 @@ void TrackerManager::send_announce(TrackerSession& t) {
     t.transaction_id = next_random();
     t.in_flight      = event;
 
-    const AnnounceParams params{
-        .downloaded = downloaded_,
-        .uploaded   = uploaded_,
-        .left       = left_,
-    };
     auto packet = build_announce_request(t, event, peer_id_, torrent_.info_hash,
-                                         listen_port_, params);
+                                         listen_port_, stats);
 
     if (::send(t.sock.get(), packet.data(), packet.size(), 0) < 0) {
         const int err = errno;
@@ -398,7 +392,7 @@ void TrackerManager::send_announce(TrackerSession& t) {
 
     log(LogLevel::Debug, "sent announce to {}:{} (event={}, txn={:#010x}, left={})",
     t.address.host, t.address.port, static_cast<uint32_t>(event),
-    t.transaction_id, left_);
+    t.transaction_id, stats.left);
 }
 
 // Returns false only when the caller must fail_backoff.
@@ -461,7 +455,9 @@ void TrackerManager::on_timeout(TrackerSession& t, std::chrono::steady_clock::ti
         t.address.host, t.address.port, t.retries, response_timeout(t).count());
 }
 
-void TrackerManager::advance(TrackerSession& t, std::chrono::steady_clock::time_point now) {
+void TrackerManager::advance(TrackerSession& t, const AnnounceParams& stats, 
+    std::chrono::steady_clock::time_point now) {
+
     switch (t.state) {
         case TrackerState::Disconnected:
             if (now >= t.next_action) send_connect(t);
@@ -473,7 +469,7 @@ void TrackerManager::advance(TrackerSession& t, std::chrono::steady_clock::time_
             return;
 
         case TrackerState::Connected:
-            send_announce(t);
+            send_announce(t, stats);
             return;
 
         case TrackerState::Idle:

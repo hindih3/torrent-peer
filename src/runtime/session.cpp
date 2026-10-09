@@ -74,7 +74,12 @@ void Session::run(const std::atomic<bool>& shutdown) {
         for (auto& ev : peers_.handle_events(all.first(tracker_base)))
             dispatch(ev);
         if (use_trackers_) {
-            auto fresh = trackers_.tick(all.subspan(tracker_base));
+            const AnnounceParams stats = {
+                .downloaded = downloaded_,
+                .uploaded = uploaded_,
+                .left = pieces_.bytes_left()
+            };
+            auto fresh = trackers_.tick(all.subspan(tracker_base), stats);
             if (!fresh.empty()) peers_.add_peers(std::move(fresh));
         }
 

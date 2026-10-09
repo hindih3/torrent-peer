@@ -72,7 +72,7 @@ public:
 
     [[nodiscard]] std::vector<pollfd> build_fds() const;
 
-    [[nodiscard]] std::vector<Peer> tick(std::span<const pollfd> pfds);
+    [[nodiscard]] std::vector<Peer> tick(std::span<const pollfd> pfds, const AnnounceParams& stats);
     [[nodiscard]] std::chrono::milliseconds until_next_action() const;
 
 private:
@@ -92,10 +92,10 @@ private:
 
     [[nodiscard]] TrackerEvent pending_event(const TrackerSession& t) const;
 
-    void send_announce(TrackerSession& t);
+    void send_announce(TrackerSession& t, const AnnounceParams& stats);
     [[nodiscard]] bool recv_announce(TrackerSession& t, std::vector<Peer>& out);
 
-    void advance(TrackerSession& t, std::chrono::steady_clock::time_point now);
+    void advance(TrackerSession& t, const AnnounceParams& stats,std::chrono::steady_clock::time_point now);
     static void on_timeout(TrackerSession& t, std::chrono::steady_clock::time_point now);
     void drain(TrackerSession& t);
 
@@ -103,7 +103,6 @@ private:
     const TorrentFile& torrent_;
     std::string peer_id_;
     uint16_t listen_port_;
-    uint64_t downloaded_ = 0, left_ = 0, uploaded_ = 0;
     std::vector<uint8_t> buf_ = std::vector<uint8_t>(65536);
     bool download_complete_ = false;
     std::mt19937 rng_;

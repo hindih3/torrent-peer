@@ -46,7 +46,8 @@ int main(int argc, char** argv) {
                 && errno != EINTR)
                 throw std::runtime_error("poll failed");
 
-            for (const auto& p : trackers.tick(pfds)) {
+            for (const auto& p : trackers.tick(pfds, {
+                .downloaded = 0, .uploaded = 0, .left = torrent.total_length})) {
                 ++total;
                 std::cout << "  peer " << p.host << ":" << p.port << "\n";
             }
