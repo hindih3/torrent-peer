@@ -84,7 +84,7 @@ void Session::run(const std::atomic<bool>& shutdown) {
             completed_ = true;
             disk_.sync();
             log(LogLevel::Info, "download complete in {:.1f} s | seeding",
-                ms_since(started) / 1000.0);
+                static_cast<double>(ms_since(started)) / 1000.0);
         }
 
         // Keep every unchoked peer's pipe full instead of one block per round
@@ -100,11 +100,10 @@ void Session::run(const std::atomic<bool>& shutdown) {
             }
         }
 
-        const int64_t elapsed = ms_since(last_report);
-        if (elapsed >= 1000) {
-            const double secs = elapsed / 1000.0;
-            const double down = (downloaded_ - last_down) / secs / (1024.0 * 1024.0);
-            const double up   = (uploaded_   - last_up)   / secs / (1024.0 * 1024.0);
+        if (const int64_t elapsed = ms_since(last_report); elapsed >= 1000) {
+            const double secs = static_cast<double>(elapsed) / 1000.0;
+            const double down = static_cast<double>(downloaded_ - last_down) / secs / (1024.0 * 1024.0);
+            const double up   = static_cast<double>(uploaded_   - last_up)   / secs / (1024.0 * 1024.0);
 
             log(LogLevel::Info, "{}/{} pieces, {} peers, {:.2f} down / {:.2f} up MiB/s",
                 pieces_.completed(), pieces_.total(), peers_.peer_count(), down, up);
@@ -117,7 +116,7 @@ void Session::run(const std::atomic<bool>& shutdown) {
 
     disk_.sync();
     log(LogLevel::Info, "stopped after {:.1f} s ({}/{} pieces)",
-        ms_since(started) / 1000.0, pieces_.completed(), pieces_.total());
+        static_cast<double>(ms_since(started)) / 1000.0, pieces_.completed(), pieces_.total());
 }
 
 void Session::dispatch(const PeerEvent& ev) {
