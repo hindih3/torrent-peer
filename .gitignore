@@ -8,8 +8,9 @@ cmake-build-*/
 # local test data
 *.torrent
 *.log
+*.bin
 /downloads/
-/test/downloads/
+/tests/downloads/
 
 # fuzzing
 /corpus/
