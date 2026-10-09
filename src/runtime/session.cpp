@@ -1,8 +1,6 @@
 #include "session.hpp"
 
 #include <chrono>
-#include <iomanip>
-#include <iostream>
 #include <ranges>
 #include <span>
 
@@ -108,10 +106,8 @@ void Session::run(const std::atomic<bool>& shutdown) {
             const double down = (downloaded_ - last_down) / secs / (1024.0 * 1024.0);
             const double up   = (uploaded_   - last_up)   / secs / (1024.0 * 1024.0);
 
-            std::cerr << pieces_.completed() << "/" << pieces_.total() << " pieces, "
-                      << peers_.peer_count() << " peers, "
-                      << std::fixed << std::setprecision(2)
-                      << down << " down / " << up << " up MiB/s\n";
+            log(LogLevel::Info, "{}/{} pieces, {} peers, {:.2f} down / {:.2f} up MiB/s",
+                pieces_.completed(), pieces_.total(), peers_.peer_count(), down, up);
 
             last_down = downloaded_;
             last_up   = uploaded_;
