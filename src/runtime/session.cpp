@@ -52,8 +52,8 @@ void Session::run(const std::atomic<bool>& shutdown) {
     const auto started = std::chrono::steady_clock::now();
     auto last_report   = started;
 
-    uint64_t down_since = 0;   // bytes downloaded since the last status line
-    uint64_t up_since   = 0;   // bytes uploaded since the last status line
+    uint64_t last_down = downloaded_;   // totals at the last status line
+    uint64_t last_up   = uploaded_;
 
     while (!shutdown.load()) {
         // One pollfd list: peers first, trackers after.
@@ -74,7 +74,7 @@ void Session::run(const std::atomic<bool>& shutdown) {
 
         std::span<pollfd> all(pfds);
         for (auto& ev : peers_.handle_events(all.first(tracker_base)))
-            dispatch(ev, down_since, up_since);
+            dispatch(ev);
         if (use_trackers_) {
             auto fresh = trackers_.tick(all.subspan(tracker_base));
             if (!fresh.empty()) peers_.add_peers(std::move(fresh));
@@ -105,16 +105,16 @@ void Session::run(const std::atomic<bool>& shutdown) {
         const int64_t elapsed = ms_since(last_report);
         if (elapsed >= 1000) {
             const double secs = elapsed / 1000.0;
-            const double down = down_since / secs / (1024.0 * 1024.0);
-            const double up   = up_since   / secs / (1024.0 * 1024.0);
+            const double down = (downloaded_ - last_down) / secs / (1024.0 * 1024.0);
+            const double up   = (uploaded_   - last_up)   / secs / (1024.0 * 1024.0);
 
             std::cerr << pieces_.completed() << "/" << pieces_.total() << " pieces, "
                       << peers_.peer_count() << " peers, "
                       << std::fixed << std::setprecision(2)
                       << down << " down / " << up << " up MiB/s\n";
 
-            down_since = 0;
-            up_since   = 0;
+            last_down = downloaded_;
+            last_up   = uploaded_;
             last_report = std::chrono::steady_clock::now();
         }
     }
@@ -124,17 +124,17 @@ void Session::run(const std::atomic<bool>& shutdown) {
         ms_since(started) / 1000.0, pieces_.completed(), pieces_.total());
 }
 
-void Session::dispatch(const PeerEvent& ev, uint64_t& down_since, uint64_t& up_since) {
+void Session::dispatch(const PeerEvent& ev) {
     switch (ev.type) {
-        case PeerEvent::Piece:   on_piece(ev, down_since); break;
-        case PeerEvent::Joined:  greet(ev.peer_id);           break;
-        case PeerEvent::Request: on_request(ev, up_since); break;
+        case PeerEvent::Piece:   on_piece(ev);      break;
+        case PeerEvent::Joined:  greet(ev.peer_id); break;
+        case PeerEvent::Request: on_request(ev);    break;
         default: break;
     }
 }
 
-void Session::on_piece(const PeerEvent& ev, uint64_t& down_since) {
-    down_since += ev.block.data.size();
+void Session::on_piece(const PeerEvent& ev) {
+    downloaded_ += ev.block.data.size();
     if (auto done = pieces_.on_block(ev.block)) {
         disk_.write_piece(*done);
         peers_.broadcast_have(done->index);
@@ -143,7 +143,7 @@ void Session::on_piece(const PeerEvent& ev, uint64_t& down_since) {
     }
 }
 
-void Session::on_request(const PeerEvent& ev, uint64_t& up_since) {
+void Session::on_request(const PeerEvent& ev) {
     if (!pieces_.have_piece(ev.req.piece_index)) {
         log(LogLevel::Debug, "peer {} requested unavailable piece {}; ignoring",
             ev.peer_id, ev.req.piece_index);
@@ -152,7 +152,7 @@ void Session::on_request(const PeerEvent& ev, uint64_t& up_since) {
     try {
         auto data = disk_.read_block(ev.req.piece_index, ev.req.offset, ev.req.length);
         peers_.send_piece(ev.peer_id, ev.req.piece_index, ev.req.offset, data);
-        up_since += data.size();
+        uploaded_ += data.size();
     } catch (const std::exception& e) {
         log(LogLevel::Debug, "peer {} bad request piece {} off {} len {}: {}",
             ev.peer_id, ev.req.piece_index, ev.req.offset, ev.req.length, e.what());

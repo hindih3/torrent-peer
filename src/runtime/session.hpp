@@ -16,9 +16,9 @@ public:
 private:
     void greet(uint32_t peer_id);
 
-    void dispatch(const PeerEvent &ev, uint64_t &down_since, uint64_t &up_since);
-    void on_piece(const PeerEvent &ev, uint64_t &down_since);
-    void on_request(const PeerEvent &ev, uint64_t &up_since);
+    void dispatch(const PeerEvent& ev);
+    void on_piece(const PeerEvent& ev);
+    void on_request(const PeerEvent& ev);
 
     const TorrentFile& torrent_;
     const std::string peer_id_;
@@ -30,8 +30,6 @@ private:
 
     bool use_trackers_;
     bool completed_  = false;
-
-    [[maybe_unused]] uint64_t downloaded_ = 0;
-    [[maybe_unused]] uint64_t uploaded_   = 0;
-    [[maybe_unused]] uint64_t verified_   = 0;
+    uint64_t downloaded_ = 0;
+    uint64_t uploaded_   = 0;
 };
