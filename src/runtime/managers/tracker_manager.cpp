@@ -525,6 +525,7 @@ void TrackerManager::begin_shutdown() {
             case Idle:
             case Announcing:                // send_announce sends 'stopped', reconnecting if needed
                 t.state = Connected;
+                t.next_action = now;
                 break;
             case Connecting:                // reply leads to Connected, then 'stopped'
             case Connected:
