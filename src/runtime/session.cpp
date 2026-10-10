@@ -1,6 +1,7 @@
 #include "session.hpp"
 
 #include <chrono>
+#include <cstring>
 #include <ranges>
 #include <span>
 
@@ -124,6 +125,7 @@ void Session::run(const std::atomic<bool>& shutdown) {
     }
 
     disk_.sync();
+    shutdown_session();
     log(LogLevel::Info, "stopped after {:.1f} s ({}/{} pieces)",
         static_cast<double>(ms_since(started)) / 1000.0, pieces_.completed(), pieces_.total());
 }
@@ -160,5 +162,42 @@ void Session::on_request(const PeerEvent& ev) {
     } catch (const std::exception& e) {
         log(LogLevel::Debug, "peer {} bad request piece {} off {} len {}: {}",
             ev.peer_id, ev.req.piece_index, ev.req.offset, ev.req.length, e.what());
+    }
+}
+
+void Session::shutdown_session() {
+    using namespace std::chrono;
+    if (!use_trackers_) return;
+
+    log(LogLevel::Info, "starting tracker shutdown");
+    trackers_.begin_shutdown();
+    const AnnounceParams final_stats{
+        .downloaded = downloaded_,
+        .uploaded   = uploaded_,
+        .left       = pieces_.bytes_left(),
+    };
+    const auto deadline = steady_clock::now() + seconds(5);
+
+    while (!trackers_.shutdown_done() && steady_clock::now() < deadline) {
+        auto fds = trackers_.build_fds();
+
+        // wait until a reply arrives, a tracker timer is due, or the deadline
+        const auto remaining = ceil<milliseconds>(deadline - steady_clock::now());
+        const auto wait = std::min(remaining, trackers_.until_next_action());
+        if (poll(fds.data(), fds.size(), static_cast<int>(wait.count())) < 0) {
+            if (errno == EINTR) continue;
+            log(LogLevel::Warn, "poll failed during tracker shutdown: {}", std::strerror(errno));
+            break; // no use throwing; it's inconsequential if the poll fails in this stage
+        }
+        (void)trackers_.tick(fds, final_stats); // returned peers are irrelevant here
+    }
+
+    if (trackers_.shutdown_done()) {
+        log(LogLevel::Info, "tracker shutdown completed");
+    } else {
+        log(LogLevel::Info,
+            "tracker shutdown deadline reached; "
+            "some trackers may not have received the final announce");
+        trackers_.log_unfinished();
     }
 }

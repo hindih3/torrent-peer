@@ -79,6 +79,9 @@ public:
     void on_download_complete();
 
     void begin_shutdown();
+    [[nodiscard]] bool shutdown_done() const;
+
+    void log_unfinished() const;
 
 private:
     static std::vector<uint8_t> build_connect_request(uint32_t transaction_id);
@@ -102,7 +105,7 @@ private:
 
     void advance(TrackerSession& t, const AnnounceParams& stats,std::chrono::steady_clock::time_point now);
 
-    static void fail_send(TrackerSession &t, const char *what);
+    static void fail_send(TrackerSession& t, const char* what);
     static void on_timeout(TrackerSession& t, std::chrono::steady_clock::time_point now);
     void drain(TrackerSession& t);
 

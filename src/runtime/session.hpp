@@ -19,6 +19,7 @@ private:
     void dispatch(const PeerEvent& ev);
     void on_piece(const PeerEvent& ev);
     void on_request(const PeerEvent& ev);
+    void shutdown_session();
 
     const TorrentFile& torrent_;
     const std::string peer_id_;

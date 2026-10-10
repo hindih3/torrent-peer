@@ -431,6 +431,8 @@ bool TrackerManager::recv_announce(TrackerSession& t, std::vector<Peer>& out) {
             return false;
         }
         if (t.in_flight == EventStopped) {
+            log(LogLevel::Debug, "{}:{} acknowledged stopped",
+                t.address.host, t.address.port);
             t.state = TrackerState::Stopped;
             t.sock.reset();
             return true;
@@ -533,4 +535,16 @@ void TrackerManager::begin_shutdown() {
                 break;
         }
     }
+}
+
+bool TrackerManager::shutdown_done() const {
+    return std::ranges::all_of(trackers_, [](const TrackerSession& t) {
+        return t.state == TrackerState::Stopped;
+    });
+}
+
+void TrackerManager::log_unfinished() const {
+    for (const auto& t : trackers_)
+        if (t.state != TrackerState::Stopped)
+            log(LogLevel::Debug, "{}:{} didn't acknowledge stopped", t.address.host, t.address.port);
 }
