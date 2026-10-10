@@ -134,7 +134,7 @@ std::vector<pollfd> TrackerManager::build_fds() const {
     return pfds;
 }
 
-std::vector<Peer> TrackerManager::tick(std::span<const pollfd> pfds, const AnnounceParams& stats) {
+std::vector<Peer> TrackerManager::tick(const std::span<const pollfd> pfds, const AnnounceParams& stats) {
     std::vector<Peer> fresh;
     if (pfds.size() != trackers_.size()) {
         log(LogLevel::Error, "tick: got {} pollfds for {} trackers", pfds.size(), trackers_.size());
@@ -148,9 +148,10 @@ std::vector<Peer> TrackerManager::tick(std::span<const pollfd> pfds, const Annou
         auto& t = trackers_[i];
 
         bool ok = true;
+        using enum TrackerState;
         switch (t.state) {
-            case TrackerState::Connecting: ok = recv_connect(t); break;
-            case TrackerState::Announcing: ok = recv_announce(t, fresh); break;
+            case Connecting: ok = recv_connect(t); break;
+            case Announcing: ok = recv_announce(t, fresh); break;
             default: drain(t); break;
         }
         if (!ok) fail_backoff(t);
@@ -167,10 +168,12 @@ std::chrono::milliseconds TrackerManager::until_next_action() const {
     const auto now = steady_clock::now();
     auto soonest = steady_clock::time_point::max();
 
-    for (const auto& t : trackers_)
+    for (const auto& t : trackers_) {
+        if (t.state == TrackerState::Stopped) continue;
         soonest = std::min(soonest, t.next_action);
+    }
 
-    if (soonest == steady_clock::time_point::max()) return hours(1);  // no trackers
+    if (soonest == steady_clock::time_point::max()) return hours(1);  // no active trackers
     if (soonest <= now) return milliseconds(0);
     return ceil<milliseconds>(soonest - now);
 }
@@ -353,6 +356,7 @@ bool TrackerManager::recv_connect(TrackerSession& t) {
 }
 
 TrackerEvent TrackerManager::pending_event(const TrackerSession& t) const {
+    if (stopping_) return EventStopped; // overrides everything below on shutdown
     switch (t.reported) {
         case ReportedNothing:   return EventStarted;
         case ReportedStarted:   return download_complete_ ? EventCompleted : EventNone;
@@ -420,6 +424,11 @@ bool TrackerManager::recv_announce(TrackerSession& t, std::vector<Peer>& out) {
                 t.address.host, t.address.port, r.error);
             return false;
         }
+        if (t.in_flight == EventStopped) {
+            t.state = TrackerState::Stopped;
+            t.sock.reset();
+            return true;
+        }
 
         if (t.in_flight == EventStarted)   t.reported = ReportedStarted;
         if (t.in_flight == EventCompleted) t.reported = ReportedCompleted;
@@ -455,26 +464,30 @@ void TrackerManager::on_timeout(TrackerSession& t, std::chrono::steady_clock::ti
         t.address.host, t.address.port, t.retries, response_timeout(t).count());
 }
 
-void TrackerManager::advance(TrackerSession& t, const AnnounceParams& stats, 
+void TrackerManager::advance(TrackerSession& t, const AnnounceParams& stats,
     std::chrono::steady_clock::time_point now) {
 
+    using enum TrackerState;
     switch (t.state) {
-        case TrackerState::Disconnected:
+        case Disconnected:
             if (now >= t.next_action) send_connect(t);
             return;
 
-        case TrackerState::Connecting:
-        case TrackerState::Announcing:
+        case Connecting:
+        case Announcing:
             if (now >= t.next_action) on_timeout(t, now);
             return;
 
-        case TrackerState::Connected:
+        case Connected:
             send_announce(t, stats);
             return;
 
-        case TrackerState::Idle:
-            if (now >= t.next_action) t.state = TrackerState::Disconnected;
+        case Idle:
+            if (now >= t.next_action) t.state = Disconnected;
             return;
+
+        case Stopped:
+            return; // socket closed, nothing left to do
     }
     log(LogLevel::Error, "{}:{} unknown TrackerState: {}",
     t.address.host, t.address.port, static_cast<int>(t.state));
@@ -487,4 +500,30 @@ void TrackerManager::on_download_complete() {
     for (auto& t : trackers_)
         if (t.state == TrackerState::Idle && t.reported == ReportedStarted)
             t.next_action = now;
+}
+
+void TrackerManager::begin_shutdown() {
+    stopping_ = true;
+    const auto now = std::chrono::steady_clock::now();
+    for (auto& t : trackers_) {
+        if (t.reported == ReportedNothing) {
+            t.state = TrackerState::Stopped;
+            t.sock.reset();
+            continue;        // never acknowledged us: nothing to withdraw
+        }
+        using enum TrackerState;
+        switch (t.state) {
+            case Disconnected:              // backing off: retry now
+                t.next_action = now;
+                break;
+            case Idle:
+            case Announcing:                // send_announce sends 'stopped', reconnecting if needed
+                t.state = Connected;
+                break;
+            case Connecting:                // reply leads to Connected, then 'stopped'
+            case Connected:
+            case Stopped:
+                break;
+        }
+    }
 }

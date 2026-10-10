@@ -32,6 +32,7 @@ enum class TrackerState {
     Connected,      // have connection_id, ready to announce
     Announcing,     // announce sent, awaiting response
     Idle,           // announced; next announce due at next_action
+    Stopped,        // activated on shutdown
 };
 
 struct TrackerSession {
@@ -77,6 +78,8 @@ public:
 
     void on_download_complete();
 
+    void begin_shutdown();
+
 private:
     static std::vector<uint8_t> build_connect_request(uint32_t transaction_id);
     static std::vector<uint8_t> build_announce_request(
@@ -110,4 +113,5 @@ private:
     bool download_complete_ = false;
     std::mt19937 rng_;
     uint32_t key_;
+    bool stopping_ = false;
 };
