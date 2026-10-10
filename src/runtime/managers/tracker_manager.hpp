@@ -75,6 +75,8 @@ public:
     [[nodiscard]] std::vector<Peer> tick(std::span<const pollfd> pfds, const AnnounceParams& stats);
     [[nodiscard]] std::chrono::milliseconds until_next_action() const;
 
+    void on_download_complete();
+
 private:
     static std::vector<uint8_t> build_connect_request(uint32_t transaction_id);
     static std::vector<uint8_t> build_announce_request(
@@ -96,6 +98,7 @@ private:
     [[nodiscard]] bool recv_announce(TrackerSession& t, std::vector<Peer>& out);
 
     void advance(TrackerSession& t, const AnnounceParams& stats,std::chrono::steady_clock::time_point now);
+
     static void on_timeout(TrackerSession& t, std::chrono::steady_clock::time_point now);
     void drain(TrackerSession& t);
 

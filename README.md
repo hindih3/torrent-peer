@@ -116,7 +116,10 @@ tools, such as `LLVMFuzzerTestOneInput`, are excluded in `.clang-tidy`.
 
 - **Tracker state machine.** Each UDP tracker (BEP 15) runs its own
   connect/announce cycle with exponential backoff, connection-ID expiry, and
-  periodic re-announce, all non-blocking inside the same loop.
+  periodic re-announce, all non-blocking inside the same loop. Announces
+  carry live progress (`downloaded`, `uploaded`, `left`), and `completed` is
+  sent as soon as the download finishes, but never when resuming an
+  already-complete download.
 
 - **Treats all network input as hostile.** Path traversal in torrent files,
   malformed bitfields, and oversized messages are rejected before they can do
@@ -151,7 +154,7 @@ tools, such as `LLVMFuzzerTestOneInput`, are excluded in `.clang-tidy`.
 
 - In-flight requests aren't released on choke or disconnect; they return
   to the pool only after a timeout
-- Progress isn't reported to trackers (no `completed`/`stopped` events)
+- No `stopped` event is sent to trackers on exit
 - No keep-alives are sent and idle peers are never timed out
 - A peer's request queue and write buffer are unbounded
 - DNS resolution blocks the event loop

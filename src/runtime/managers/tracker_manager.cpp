@@ -480,3 +480,11 @@ void TrackerManager::advance(TrackerSession& t, const AnnounceParams& stats,
     t.address.host, t.address.port, static_cast<int>(t.state));
     on_timeout(t, now);
 }
+
+void TrackerManager::on_download_complete() {
+    download_complete_ = true;
+    const auto now = std::chrono::steady_clock::now();
+    for (auto& t : trackers_)
+        if (t.state == TrackerState::Idle && t.reported == ReportedStarted)
+            t.next_action = now;
+}
