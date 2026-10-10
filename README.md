@@ -154,7 +154,6 @@ tools, such as `LLVMFuzzerTestOneInput`, are excluded in `.clang-tidy`.
 
 - In-flight requests aren't released on choke or disconnect; they return
   to the pool only after a timeout
-- No `stopped` event is sent to trackers on exit
 - No keep-alives are sent and idle peers are never timed out
 - A peer's request queue and write buffer are unbounded
 - DNS resolution blocks the event loop
