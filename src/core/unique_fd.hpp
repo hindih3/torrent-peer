@@ -29,7 +29,7 @@ public:
         return f;
     }
 
-    // Close the current fd (if any) and adopt `f`. Leaves errno untouched.
+    // Close the current fd (if any) and adopt 'f'. Leaves errno untouched.
     void reset(int f = -1) noexcept {
         if (fd_ >= 0 && fd_ != f) {
             const int saved = errno;
