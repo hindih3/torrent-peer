@@ -19,8 +19,7 @@ int main(int argc, char** argv) {
     }
 
     try {
-        TorrentFile torrent = parse_torrent(read_file(args.torrent_path));
-        print_torrent(torrent, true);
+        const TorrentFile torrent = parse_torrent(read_file(args.torrent_path));
 
         std::signal(SIGPIPE, SIG_IGN);
         std::signal(SIGINT, handle_sigint);
