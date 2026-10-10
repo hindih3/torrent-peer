@@ -102,6 +102,7 @@ private:
 
     void advance(TrackerSession& t, const AnnounceParams& stats,std::chrono::steady_clock::time_point now);
 
+    static void fail_send(TrackerSession &t, const char *what);
     static void on_timeout(TrackerSession& t, std::chrono::steady_clock::time_point now);
     void drain(TrackerSession& t);
 

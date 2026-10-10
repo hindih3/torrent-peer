@@ -268,7 +268,6 @@ void TrackerManager::open_socket(TrackerSession& t) {
 }
 
 void TrackerManager::fail_backoff(TrackerSession& t) {
-    t.sock.reset();
     t.state = TrackerState::Disconnected;
     t.retries = std::min(t.retries + 1, 8);
     auto delay = response_timeout(t); // 15·2^n
@@ -280,6 +279,18 @@ void TrackerManager::fail_backoff(TrackerSession& t) {
         log(LogLevel::Warn, "{}:{} keeps failing, retrying only every {}s. Might be dead",
             t.address.host, t.address.port, delay.count());
 }
+
+// only reset a socket on a failed send. if the machine's own address
+// changes, an old socket can keep sending from an address that no
+// longer exists, so it's closed and recreated on retry
+void TrackerManager::fail_send(TrackerSession& t, const char* what) {
+    const int err = errno;
+    log(LogLevel::Debug, "send {} to {}:{} failed: {}",
+        what, t.address.host, t.address.port, std::strerror(err));
+    t.sock.reset();
+    fail_backoff(t);
+}
+
 
 void TrackerManager::send_connect(TrackerSession& t) {
     if (!t.sock) {
@@ -295,9 +306,7 @@ void TrackerManager::send_connect(TrackerSession& t) {
     t.transaction_id = next_random();
     const auto packet = build_connect_request(t.transaction_id);
     if (::send(t.sock.get(), packet.data(), packet.size(), 0) < 0) {
-        log(LogLevel::Debug, "send connect to {}:{} failed: {}",
-            t.address.host, t.address.port, std::strerror(errno));
-        fail_backoff(t);
+        fail_send(t, "connect");
         return;
     }
 
@@ -384,10 +393,7 @@ void TrackerManager::send_announce(TrackerSession& t, const AnnounceParams& stat
                                          listen_port_, stats);
 
     if (::send(t.sock.get(), packet.data(), packet.size(), 0) < 0) {
-        const int err = errno;
-        log(LogLevel::Debug, "send announce to {}:{} failed: {}",
-            t.address.host, t.address.port, std::strerror(err));
-        fail_backoff(t);
+        fail_send(t, "announce");
         return;
     }
 
