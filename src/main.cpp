@@ -4,6 +4,7 @@
 #include <fstream>
 
 #include "cli/args.hpp"
+#include "core/log.hpp"
 #include "runtime/session.hpp"
 
 static std::atomic<bool> g_shutdown{false};
@@ -24,7 +25,8 @@ int main(int argc, char** argv) {
         std::signal(SIGPIPE, SIG_IGN);
         std::signal(SIGINT, handle_sigint);
 
-        std::cerr << "saving to " << std::filesystem::absolute(args.out_dir) << '\n';
+        log(LogLevel::Info, "saving to {}",
+            std::filesystem::absolute(args.out_dir).string());
         Session session(torrent, args.manual_peers, args.out_dir, args.port, args.use_tracker);
         session.run(g_shutdown);
     } catch (const std::exception& e) {
