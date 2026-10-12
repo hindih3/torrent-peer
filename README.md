@@ -157,6 +157,7 @@ tools, such as `LLVMFuzzerTestOneInput`, are excluded in `.clang-tidy`.
 - No keep-alives are sent and idle peers are never timed out
 - A peer's request queue and write buffer are unbounded
 - DNS resolution blocks the event loop
+- One fd per file for huge torrents can potentially trigger the per-process soft limit
 
 ## References
 
