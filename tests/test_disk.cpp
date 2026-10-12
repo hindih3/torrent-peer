@@ -7,7 +7,10 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
-#include <sys/resource.h>
+
+// DiskManager expects a TorrentFile that parse_torrent has already accepted,
+// so every torrent built here is one parse_torrent would accept too. Rejecting
+// bad metadata (lengths, unsafe or duplicate paths) is tested in test_torrent.cpp.
 
 namespace fs = std::filesystem;
 
@@ -177,37 +180,6 @@ static void test_exhaustive_reads() {
     check(all_good, "every (piece, offset, length): " + std::to_string(reads) + " reads");
 }
 
-static void test_unsafe_paths() {
-    for (const char* bad : {"..", ".", "", "a/b", "a\\b"}) {
-        const std::string shown = std::string("'") + bad + "'";
-        expect_throw("unsafe name " + shown, [&] {
-            TempDir dir;
-            DiskManager dm(make_single(bad, 4, 4), dir.path);
-        });
-        expect_throw("unsafe path component " + shown, [&] {
-            TempDir dir;
-            DiskManager dm(make_multi("safe", 4, std::vector<FileInfo>{{4, {"ok", bad}}}), dir.path);
-        });
-    }
-}
-
-static void test_bad_metadata() {
-    expect_throw("piece_length 0", [] {
-        TempDir dir;
-        DiskManager dm(make_single("zero.bin", 0, 4), dir.path);
-    });
-    expect_throw("negative file length", [] {
-        TempDir dir;
-        DiskManager dm(make_multi("neg", 4, {4, -1}), dir.path);
-    });
-    expect_throw("file lengths don't sum to total_length", [] {
-        TempDir dir;
-        TorrentFile t = make_multi("sum", 4, {4, 4});
-        t.total_length = 9;
-        DiskManager dm(t, dir.path);
-    });
-}
-
 static void test_out_of_range() {
     const TorrentFile t = make_single("range.bin", 4, 10);   // pieces of 4, 4, 2
     TempDir dir;
@@ -272,20 +244,6 @@ static void test_open_failure() {
     }
 }
 
-// A file "x" and a file inside a directory "x" can't both exist.
-static void test_file_dir_conflict() {
-    expect_throw("file 'x' then 'x/y'", [] {
-        TempDir dir;
-        DiskManager dm(make_multi("conflict", 4, std::vector<FileInfo>{
-            {2, {"x"}}, {2, {"x", "y"}}}), dir.path);
-    });
-    expect_throw("file 'x/y' then 'x'", [] {
-        TempDir dir;
-        DiskManager dm(make_multi("conflict", 4, std::vector<FileInfo>{
-            {2, {"x", "y"}}, {2, {"x"}}}), dir.path);
-    });
-}
-
 static void test_empty_torrent() {
     const TorrentFile t = make_multi("empty", 4, {0, 0});
     TempDir dir;
@@ -295,55 +253,15 @@ static void test_empty_torrent() {
     expect_throw("read from a torrent with no pieces", [&] { (void)dm.read_block(0, 0, 0); });
 }
 
-// One fd per file means a torrent with more files than RLIMIT_NOFILE can't
-// even be opened. Lowers this process's soft limit, which any process may do,
-// and restores it afterwards. Assumes a fix keeps well under the limit, since
-// peer sockets share the same budget in the real client.
-static void test_fd_limit() {
-    rlimit original{};
-    if (::getrlimit(RLIMIT_NOFILE, &original) < 0) {
-        check(false, "getrlimit");
-        return;
-    }
-
-    constexpr rlim_t kLimit = 128;
-    constexpr int    kFiles = 500;
-    rlimit lowered = original;
-    lowered.rlim_cur = kLimit;
-    if (::setrlimit(RLIMIT_NOFILE, &lowered) < 0) {
-        check(false, "setrlimit");
-        return;
-    }
-
-    try {
-        const TorrentFile t = make_multi("many", 4, std::vector<int64_t>(kFiles, 1));
-        const TempDir dir;
-        DiskManager dm(t, dir.path);
-        write_all(dm, t);
-        check(reads_match(dm, t) && on_disk_matches(t, dir.path),
-              std::to_string(kFiles) + " files under a limit of " + std::to_string(kLimit) + " fds");
-    } catch (const std::exception& e) {
-        check(false, std::to_string(kFiles) + " files under a limit of " +
-                     std::to_string(kLimit) + " fds -> " + e.what());
-    }
-
-    ::setrlimit(RLIMIT_NOFILE, &original);
-}
-
 int main() {
     test_layouts();
     test_exhaustive_reads();
-    test_unsafe_paths();
-    test_bad_metadata();
     test_out_of_range();
     test_resume();
     test_preallocation();
     test_truncated_file();
     test_open_failure();
-    test_file_dir_conflict();
     test_empty_torrent();
-    test_duplicate_paths();
-    test_fd_limit();
 
     std::printf("\n%d failure(s)\n", failures);
     return failures != 0;
