@@ -64,6 +64,10 @@ if(TP_BUILD_TESTS)
     add_executable(test-parser tests/test_parser.cpp)
     target_link_libraries(test-parser PRIVATE torrent_peer_lib)
     add_test(NAME parser COMMAND test-parser)
+
+    add_executable(test-disk tests/test_disk.cpp)
+    target_link_libraries(test-disk PRIVATE torrent_peer_lib)
+    add_test(NAME disk COMMAND test-disk)
 endif()
 
 if(TP_FUZZ)
