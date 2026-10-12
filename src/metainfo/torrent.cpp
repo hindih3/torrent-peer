@@ -9,16 +9,32 @@
 
 namespace {
     constexpr int64_t kPieceLengthCap = 64 * 1024 * 1024;
+    void check_component(const std::string& c) {
+        const bool invalid =
+            c.empty() ||
+            c == "."  ||
+            c == ".." ||
+            c.find('/')  != std::string::npos ||
+            c.find('\\') != std::string::npos ||
+            c.find('\0') != std::string::npos;
+
+        if (invalid)
+            throw std::runtime_error("unsafe path component in torrent: '" + c + "'");
+    }
 
     void validate_layout(const TorrentFile& t) {
         if (t.length.has_value() == t.files.has_value())
             throw std::runtime_error("info needs exactly one of 'length' or 'files'");
         if (t.length && *t.length < 0)
             throw std::runtime_error("negative length");
+
+        check_component(t.name);
         if (t.files) {
             for (const auto&[length, path] : *t.files) {
                 if (length < 0)      throw std::runtime_error("negative file length");
                 if (path.empty())    throw std::runtime_error("file with empty path");
+
+                for (const auto& c : path) check_component(c);
             }
 
             std::vector<std::vector<std::string>> paths;
