@@ -1,4 +1,6 @@
 #include "torrent.hpp"
+
+#include <algorithm>
 #include <iostream>
 #include <iomanip>
 
@@ -17,6 +19,19 @@ namespace {
             for (const auto&[length, path] : *t.files) {
                 if (length < 0)      throw std::runtime_error("negative file length");
                 if (path.empty())    throw std::runtime_error("file with empty path");
+            }
+
+            std::vector<std::vector<std::string>> paths;
+            for (const auto&[length, path] : *t.files) paths.push_back(path);
+            std::ranges::sort(paths);
+
+            for (size_t i = 0; i + 1 < paths.size(); ++i) {
+                const auto& curr = paths[i];
+                const auto& next = paths[i + 1];
+                if (next.size() >= curr.size() && std::equal(curr.begin(), curr.end(), next.begin()))
+                    throw std::runtime_error(curr.size() == next.size()
+                        ? "duplicate file path in torrent"
+                        : "file path is also used as a directory in torrent");
             }
         }
     }
