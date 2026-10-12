@@ -9,6 +9,7 @@
 
 namespace {
     constexpr int64_t kPieceLengthCap = 64 * 1024 * 1024;
+    constexpr int64_t kLimit = INT64_MAX;
     void check_component(const std::string& c) {
         const bool invalid =
             c.empty() ||
@@ -71,8 +72,11 @@ uint64_t calculate_total_length(const TorrentFile& t) {
         return t.length.value();
 
     uint64_t total = 0;
-    for (const auto& f : t.files.value())
+    for (const auto& f : t.files.value()) {
+        // safe: negatives already rejected
+        if (f.length + total > kLimit) throw std::runtime_error("total length overflows");
         total += f.length;
+    }
     return total;
 }
 
