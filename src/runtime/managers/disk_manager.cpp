@@ -38,7 +38,7 @@ namespace {
     #endif
         // posix_fallocate offers a strong guarantee that the full memory will be reserved
         // ftruncate only creates a sparse file; blocks are only allocated when written to
-        // with ftruncuate, a download will fail hours in if the disk space gets full when writing
+        // with ftruncate, a download will fail hours in if the disk space gets full when writing
 
         if (ftruncate(fd, static_cast<off_t>(length)) < 0) {
             throw_errno("ftruncate " + path.string());

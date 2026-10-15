@@ -1,4 +1,6 @@
 #include "torrent.hpp"
+
+#include <algorithm>
 #include <iostream>
 #include <iomanip>
 
@@ -7,16 +9,46 @@
 
 namespace {
     constexpr int64_t kPieceLengthCap = 64 * 1024 * 1024;
+    constexpr int64_t kLimit = INT64_MAX;
+    void check_component(const std::string& c) {
+        const bool invalid =
+            c.empty() ||
+            c == "."  ||
+            c == ".." ||
+            c.find('/')  != std::string::npos ||
+            c.find('\\') != std::string::npos ||
+            c.find('\0') != std::string::npos;
+
+        if (invalid)
+            throw std::runtime_error("unsafe path component in torrent: '" + c + "'");
+    }
 
     void validate_layout(const TorrentFile& t) {
         if (t.length.has_value() == t.files.has_value())
             throw std::runtime_error("info needs exactly one of 'length' or 'files'");
         if (t.length && *t.length < 0)
             throw std::runtime_error("negative length");
+
+        check_component(t.name);
         if (t.files) {
             for (const auto&[length, path] : *t.files) {
                 if (length < 0)      throw std::runtime_error("negative file length");
                 if (path.empty())    throw std::runtime_error("file with empty path");
+
+                for (const auto& c : path) check_component(c);
+            }
+
+            std::vector<std::vector<std::string>> paths;
+            for (const auto&[length, path] : *t.files) paths.push_back(path);
+            std::ranges::sort(paths);
+
+            for (size_t i = 0; i + 1 < paths.size(); ++i) {
+                const auto& curr = paths[i];
+                const auto& next = paths[i + 1];
+                if (next.size() >= curr.size() && std::equal(curr.begin(), curr.end(), next.begin()))
+                    throw std::runtime_error(curr.size() == next.size()
+                        ? "duplicate file path in torrent"
+                        : "file path is also used as a directory in torrent");
             }
         }
     }
@@ -40,8 +72,11 @@ uint64_t calculate_total_length(const TorrentFile& t) {
         return t.length.value();
 
     uint64_t total = 0;
-    for (const auto& f : t.files.value())
+    for (const auto& f : t.files.value()) {
+        // safe: negatives already rejected
+        if (f.length + total > kLimit) throw std::runtime_error("total length overflows");
         total += f.length;
+    }
     return total;
 }
 
