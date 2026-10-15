@@ -1,12 +1,11 @@
 # torrent-peer
 ![CI](https://github.com/hindih3/torrent-peer/actions/workflows/ci.yml/badge.svg)
 
-**torrent-peer** is a BitTorrent client written from scratch in C++20, with
-no dependencies beyond OpenSSL for SHA-1. The bencode parser, UDP tracker
-protocol, peer wire protocol, piece verification, and multi-file disk I/O
-are all implemented by hand. Everything runs on a single-threaded,
-non-blocking `poll` loop, where one session coordinates four narrowly scoped
-managers for trackers, peers, pieces, and disk.
+**torrent-peer** is a BitTorrent client written in C++20, with
+no dependencies beyond OpenSSL for cryptographic hashing.
+Works end-to-end, downloading and seeding on live swarms.
+
+![Big Buck Bunny download](logs/gifs/demo.gif)
 
 ## Building
 

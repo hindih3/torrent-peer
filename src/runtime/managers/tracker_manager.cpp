@@ -431,7 +431,7 @@ bool TrackerManager::recv_announce(TrackerSession& t, std::vector<Peer>& out) {
             return false;
         }
         if (t.in_flight == EventStopped) {
-            log(LogLevel::Debug, "{}:{} acknowledged stopped",
+            log(LogLevel::Info, "{}:{} acknowledged stopped",
                 t.address.host, t.address.port);
             t.state = TrackerState::Stopped;
             t.sock.reset();
@@ -546,5 +546,5 @@ bool TrackerManager::shutdown_done() const {
 void TrackerManager::log_unfinished() const {
     for (const auto& t : trackers_)
         if (t.state != TrackerState::Stopped)
-            log(LogLevel::Debug, "{}:{} didn't acknowledge stopped", t.address.host, t.address.port);
+            log(LogLevel::Info, "{}:{} didn't acknowledge stopped", t.address.host, t.address.port);
 }
