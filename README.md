@@ -1,9 +1,9 @@
 # torrent-peer
 ![CI](https://github.com/hindih3/torrent-peer/actions/workflows/ci.yml/badge.svg)
 
-**torrent-peer** is a BitTorrent client written in C++20, with
-no dependencies beyond OpenSSL for cryptographic hashing.
-Works end-to-end, downloading and seeding on live swarms.
+**torrent-peer** is a BitTorrent client written in C++20,
+with no dependencies beyond OpenSSL for SHA-1. Works end-to-end, 
+downloading and seeding on live swarms.
 
 ![Big Buck Bunny download](logs/gifs/demo.gif)
 
@@ -81,57 +81,63 @@ run-clang-tidy -p build -header-filter='src/.*'
 Add `-fix` to rename offending identifiers in place. Names fixed by outside
 tools, such as `LLVMFuzzerTestOneInput`, are excluded in `.clang-tidy`.
 
-## How it works
-
-```
-     .torrent → parser → TorrentFile
-                              │
-                              ▼
-                      ┌───────────────┐
-                      │    Session    │  owns the poll() loop
-                      └───────┬───────┘
-        ┌─┬─────────────┬─┬───┴─────────┬─┬────────────┬─┐
-        ▼ ▲             ▼ ▲             ▼ ▲            ▼ ▲
-  TrackerManager    PeerManager     PieceManager   DiskManager
-   UDP trackers      TCP peers      block choice    file I/O
-```
-
 ## Highlights
 
-- **One event loop with four managers.** A single-threaded `poll()` loop drives
-  every socket. Session coordinates four managers (trackers, peers, pieces,
-  disk) that never call each other, each with a small interface that takes
-  plain inputs and returns results. Networking is I/O-bound, so one thread
-  waiting on all sockets keeps up with the swarm without any locking.
+* **One Session, many managers.** The bulk of the program is accessed through
+  session, an orchestrator class that controls four narrowly scoped managers:
+  - `TrackerManager` UDP tracker communication
+  - `PeerManager`    peer connections / wire protocol
+  - `PieceManager`   piece selection and verification
+  - `DiskManager`    file layout and disk I/O
 
-- **Download strategy.** Rarest-first piece selection, based on per-piece
-  availability across connected peers, with 32 block requests pipelined per
-  peer so throughput isn't capped by round-trip time.
 
-- **Multi-file disk layout.** The torrent is one contiguous byte range mapped
-  onto its files. Pieces that span file boundaries are split with a binary
-  search and written with `pwrite`, in any order, into space preallocated at
-  startup.
+* **Managers never call each other.** Session is the only code that touches more
+  than one, so every interaction between the managers is written in about 200 lines.
+  Take an arriving block: Session's `on_piece()` passes it to `pieces_.on_block()`, which
+  returns a verified piece if that block completed one. Session hands the piece
+  to `disk_.write_piece()`, then calls `peers_.broadcast_have()`.
 
-- **Tracker state machine.** Each UDP tracker (BEP 15) runs its own
+
+* **Single-threaded.** All sockets and timers are handled in one `poll()` loop
+  on a single thread. Multithreading doesn't make much sense in a client like
+  this because most of its operations aren't CPU intensive. To demonstrate,
+  downloading Sintel (about 129 MB) used 2.1s of CPU over a 35s
+  download, about 6% of one core, with 18 MB peak memory. One thread means no
+  locking, synchronization and other overheads that come with multithreading.
+  The cost is that a blocking call like a DNS lookup or slow disk write
+  holds the entire client until finished.
+
+
+* **Download algorithm.** Piece rarity is calculated by summing the bitfields of
+  connected peers into a frequency array. Unchoked peers receive up to 32
+  pipelined block requests each. Pipelining shifts performance from latency-bound
+  to bandwidth-bound, reducing a file’s download time from 154s with one request 
+  to 34s with 32 (~4.5× faster).
+
+
+* **Tracker state machine.** Each UDP tracker (BEP 15) runs its own
   connect/announce cycle with exponential backoff, connection-ID expiry, and
   periodic re-announce, all non-blocking inside the same loop. Announces
   carry live progress (`downloaded`, `uploaded`, `left`), and `completed` is
   sent as soon as the download finishes, but never when resuming an
-  already-complete download.
+  already-complete download. There is also a shutdown period where the client
+  attempts to send `stopped` to connected trackers for up to 5 seconds.
 
-- **Treats all network input as hostile.** Path traversal in torrent files,
-  malformed bitfields, and oversized messages are rejected before they can do
-  harm. The info hash is computed over the original bytes, not a
-  re-encoding.
 
-- **Strict, fuzzed bencode parser.** Rejects non-canonical integers, unsorted
-  or duplicate dictionary keys, out-of-bounds string lengths, and nesting
-  deeper than 100 levels. Fuzzed with libFuzzer under ASan and UBSan.
+* **Layered input validation.** A given file is validated in two passes:
+  - BencodeParser's `parse()` only asks "is this valid bencode?" It rejects
+    non-canonical integers (`i03e`, `i-0e`), unsorted or duplicate keys,
+    string lengths past the end of the input, trailing data, and nesting
+    deeper than 100 levels. Also fuzzed with libFuzzer under ASan and UBSan.
+  - `parse_torrent()` then asks "can this be a real torrent?" It rejects unsafe
+    paths (`..`, separators, NUL), piece counts that don't match the total
+    length, and lengths that overflow.
 
-- **RAII resource ownership.** Every socket and file descriptor is owned by a
-  move-only wrapper, so nothing can leak or be closed twice, and there are no
-  manual `close()` calls outside it.
+
+* **RAII resource ownership.** Every socket and file descriptor is wrapped in
+  move-only `UniqueFd`, so nothing can leak or be closed twice. Managers
+  have sole ownership of their `UniqueFds`; Session only takes their raw values
+  for polling.
 
 ## Limitations
 
