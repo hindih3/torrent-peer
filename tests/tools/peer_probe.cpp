@@ -1,3 +1,7 @@
+//   python3 tests/tools/fake_peers.py &          (runs until killed)
+//   ./build-debug/peer-probe <file.torrent> [seconds]   (default 60)
+
+//   pkill -f fake_peers.py
 #include <poll.h>
 #include <fstream>
 #include <iostream>
@@ -13,6 +17,8 @@ int main(int argc, char** argv) {
         std::cerr << "usage: peer_probe <file.torrent> [seconds]\n";
         return 1;
     }
+    const auto run_for = std::chrono::seconds(argc > 2 ? std::stoi(argv[2]) : 60);
+
     g_log_level = LogLevel::Trace;
     std::ifstream f(argv[1], std::ios::binary);
     std::stringstream ss; ss << f.rdbuf();
@@ -30,7 +36,7 @@ int main(int argc, char** argv) {
     });
     peers.add_peers({{"127.0.0.1", "7001"}});
 
-    const auto end = std::chrono::steady_clock::now() + std::chrono::seconds(std::stoi(argv[2]));
+    const auto end = std::chrono::steady_clock::now() + std::chrono::seconds(run_for);
     while (std::chrono::steady_clock::now() < end) {
         auto pfds = peers.build_fds();
         poll(pfds.data(), pfds.size(), 1000);
