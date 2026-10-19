@@ -52,10 +52,10 @@ target_compile_options(torrent_peer_lib PRIVATE -Wall -Wextra -Wpedantic)
 add_executable(torrent-peer src/main.cpp)
 target_link_libraries(torrent-peer PRIVATE torrent_peer_lib)
 
-add_executable(tracker-probe tools/tracker_probe.cpp)
+add_executable(tracker-probe tests/tools/tracker_probe.cpp)
 target_link_libraries(tracker-probe PRIVATE torrent_peer_lib)
 
-add_executable(peer-probe tools/peer_probe.cpp)
+add_executable(peer-probe tests/tools/peer_probe.cpp)
 target_link_libraries(peer-probe PRIVATE torrent_peer_lib)
 
 if(TP_BUILD_TESTS)
