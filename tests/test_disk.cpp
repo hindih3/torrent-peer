@@ -1,4 +1,5 @@
 #include "runtime/managers/disk_manager.hpp"
+#include "helpers.hpp"
 
 #include <cstdio>
 #include <fstream>
@@ -30,21 +31,6 @@ static void expect_throw(const std::string& label, const std::function<void()>& 
         std::printf("ok    %s -> %s\n", label.c_str(), e.what());
     }
 }
-
-// A fresh directory under /tmp, removed with everything in it at scope exit.
-struct TempDir {
-    fs::path path;
-
-    TempDir() {
-        std::string tmpl = (fs::temp_directory_path() / "test_disk.XXXXXX").string();
-        if (!::mkdtemp(tmpl.data())) throw std::runtime_error("mkdtemp failed");
-        path = tmpl;
-    }
-    ~TempDir() { fs::remove_all(path); }
-
-    TempDir(const TempDir&)            = delete;
-    TempDir& operator=(const TempDir&) = delete;
-};
 
 // Only the number of piece hashes matters to DiskManager, not their contents.
 static void set_pieces(TorrentFile& t) {

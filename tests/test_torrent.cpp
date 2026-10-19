@@ -1,5 +1,6 @@
 #include "metainfo/torrent.hpp"
 #include "core/sha1.hpp"
+#include "helpers.hpp"
 
 #include <cstdio>
 #include <functional>
@@ -42,33 +43,6 @@ static void expect_accept(const std::string& label, const std::string& data,
         std::printf("FAIL  expected accept: %s -> %s\n", label.c_str(), e.what());
         ++failures;
     }
-}
-
-// --- bencode builders --------------------------------------------------------
-
-// Key -> already-encoded value. std::map keeps keys in raw byte order, which is
-// the order the parser insists on.
-using Entries = std::map<std::string, std::string>;
-
-static std::string str(const std::string& s) { return std::to_string(s.size()) + ":" + s; }
-static std::string num(const int64_t v)      { return "i" + std::to_string(v) + "e"; }
-
-static std::string list(const std::vector<std::string>& encoded) {
-    std::string out = "l";
-    for (const auto& e : encoded) out += e;
-    return out + "e";
-}
-
-static std::string strings(const std::vector<std::string>& raw) {
-    std::vector<std::string> encoded;
-    for (const auto& s : raw) encoded.push_back(str(s));
-    return list(encoded);
-}
-
-static std::string dict(const Entries& d) {
-    std::string out = "d";
-    for (const auto& [k, v] : d) out += str(k) + v;
-    return out + "e";
 }
 
 // --- torrent builders --------------------------------------------------------
