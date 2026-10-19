@@ -72,6 +72,19 @@ if(TP_BUILD_TESTS)
     add_executable(test-torrent tests/test_torrent.cpp)
     target_link_libraries(test-torrent PRIVATE torrent_peer_lib OpenSSL::Crypto)
     add_test(NAME torrent COMMAND test-torrent)
+
+    find_package(Python3 COMPONENTS Interpreter)
+    if(Python3_Interpreter_FOUND)
+        foreach(scenario baseline choke disconnect timeout silent bad-data)
+            add_test(NAME swarm-${scenario}
+                    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/swarm_test.py
+                    $<TARGET_FILE:torrent-peer> ${scenario})
+            set_tests_properties(swarm-${scenario} PROPERTIES LABELS swarm TIMEOUT 60)
+        endforeach()
+
+        set_tests_properties(swarm-choke swarm-disconnect swarm-timeout swarm-bad-data
+                PROPERTIES WILL_FAIL TRUE)
+    endif()
 endif()
 
 if(TP_FUZZ)
