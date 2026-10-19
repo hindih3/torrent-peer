@@ -1,4 +1,7 @@
-// Drives TrackerManager on its own: no peers, no disk, no Session.
+//   python3 tests/tools/fake_tracker.py &           (runs until killed)
+//   ./build-debug/tracker-probe <file.torrent> [seconds]   (default 60)
+
+//   pkill -f fake_tracker.py
 #include <poll.h>
 #include <cerrno>
 #include <chrono>
