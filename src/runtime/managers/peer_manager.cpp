@@ -504,9 +504,10 @@ void PeerManager::handle_message(uint32_t peer_id, const std::vector<uint8_t>& m
                 const auto match = std::ranges::find_if(c.pending, [&](const PendingRequest& p) {
                     return p.req.piece_index == index && p.req.offset == begin && p.req.length == length;
                 });
-                if (match != c.pending.end())
+                if (match != c.pending.end()) {
                     c.pending.erase(match);
-                else
+                    c.snubbed = false;
+                } else
                     log(LogLevel::Trace, "peer {} <- piece {} off {}: not pending (late or unrequested)",
                         peer_id, index, begin);
 
