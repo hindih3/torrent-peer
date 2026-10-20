@@ -1,5 +1,5 @@
 #pragma once
-#include <chrono>
+
 #include <cstdint>
 #include <iosfwd>
 #include <string>
@@ -22,11 +22,6 @@ struct PeerEvent {
     Block        block;    // valid when type == Piece
     BlockRequest req{};    // valid when type == Request
     std::vector<BlockRequest> released{};   // valid when type == Choked or Dropped
-};
-
-struct PendingRequest {
-    BlockRequest req{};
-    std::chrono::steady_clock::time_point sent_at;
 };
 
 struct PeerConnection {
