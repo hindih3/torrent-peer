@@ -138,10 +138,14 @@ void Session::run(const std::atomic<bool>& shutdown) {
 
 void Session::dispatch(const PeerEvent& ev) {
     switch (ev.type) {
-        case PeerEvent::Piece:   on_piece(ev);      break;
         case PeerEvent::Joined:  greet(ev.peer_id); break;
+        case PeerEvent::Piece:   on_piece(ev);      break;
         case PeerEvent::Request: on_request(ev);    break;
-        default: break;
+
+        case PeerEvent::Choke:
+        case PeerEvent::Dropped: pieces_.release(ev.released); break;
+
+        case PeerEvent::Unchoke: break;
     }
 }
 
