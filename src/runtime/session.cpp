@@ -9,7 +9,7 @@
 #include "core/peer_id.hpp"
 
 namespace {
-    constexpr int  kPipelineDepth  = 32;                        // requests in flight per peer
+    constexpr size_t kPipelineDepth = 32; // requests in flight per peer
     constexpr auto kRequestTimeout = std::chrono::seconds(15); // before a block goes back in the pool
 
     int64_t ms_since(std::chrono::steady_clock::time_point t) {
@@ -87,7 +87,13 @@ void Session::run(const std::atomic<bool>& shutdown) {
             if (!fresh.empty()) peers_.add_peers(std::move(fresh));
         }
 
-        pieces_.requeue_stale(kRequestTimeout);
+        const auto cutoff = std::chrono::steady_clock::now() - kRequestTimeout;
+        for (auto& [id, c] : peers_.connections()) {
+            const auto stale = take_stale(c.pending, cutoff);
+            if (stale.empty()) continue;
+            log(LogLevel::Debug, "peer {}: {} request(s) timed out", id, stale.size());
+            pieces_.release(stale);
+        }
 
         if (pieces_.is_complete() && !completed_) {
             completed_ = true;
@@ -103,7 +109,7 @@ void Session::run(const std::atomic<bool>& shutdown) {
         const auto& availability = peers_.get_piece_frequency();
         for (auto& [id, c] : peers_.connections()) {
             if (c.peer_choking) continue;
-            while (c.outstanding < kPipelineDepth) {
+            while (c.pending.size() < kPipelineDepth) {
                 auto req = pieces_.pick_block(c.has_pieces, availability);
                 if (!req) break;
                 peers_.send_request(id, *req);

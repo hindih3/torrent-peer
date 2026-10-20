@@ -2,10 +2,10 @@
 #include "metainfo/torrent.hpp"
 
 #include <array>
-#include <chrono>
 #include <cstdint>
 #include <optional>
 #include <random>
+#include <span>
 #include <unordered_map>
 #include <vector>
 
@@ -26,7 +26,11 @@ public:
     // return it (moved out) for the caller to write to disk, else nullopt
     std::optional<CompletedPiece> on_block(const Block& block);
 
-    void requeue_stale(std::chrono::seconds timeout);
+    // return given-up requests to the pool: each block still Requested goes
+    // back to Missing; blocks already Received, or in pieces that have since
+    // completed, are left alone. Relies on every Requested block being in
+    // exactly one peer's pending list (breaks with endgame mode)
+    void release(std::span<const BlockRequest> reqs);
 
     bool is_complete() const;
     bool recheck(uint32_t index, const std::vector<uint8_t>& data);
@@ -41,14 +45,9 @@ public:
 private:
     enum class BlockState { Missing, Requested, Received };
 
-    struct BlockSlot {
-        BlockState state = BlockState::Missing;
-        std::chrono::steady_clock::time_point sent_at{};
-    };
-
     struct PartialPiece {
         std::vector<uint8_t>   data;
-        std::vector<BlockSlot> blocks;
+        std::vector<BlockState> states;
         uint32_t               received = 0;
     };
 

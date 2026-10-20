@@ -1,9 +1,9 @@
 #include "piece_manager.hpp"
 
 #include <algorithm>
+#include <cassert>
 #include <cstring>
-#include <ranges>
-
+#include <limits>
 #include "core/sha1.hpp"
 
 PieceManager::PieceManager(const TorrentFile& torrent) :
@@ -53,20 +53,20 @@ std::optional<CompletedPiece> PieceManager::on_block(const Block& block) {
 
     if (block.offset % kBlockSize != 0)             return std::nullopt;
     uint32_t b = block.offset / kBlockSize;
-    if (b >= pp.blocks.size())                      return std::nullopt;
+    if (b >= pp.states.size())                      return std::nullopt;
     if (block.offset + block.data.size() > pp.data.size()) return std::nullopt;
 
     std::memcpy(pp.data.data() + block.offset,
                 block.data.data(), block.data.size());
 
     // Guard against a duplicate delivery double-counting the block.
-    if (pp.blocks[b].state != BlockState::Received) ++pp.received;
-    pp.blocks[b].state = BlockState::Received;
+    if (pp.states[b] != BlockState::Received) ++pp.received;
+    pp.states[b] = BlockState::Received;
 
-    if (pp.received < pp.blocks.size())             return std::nullopt;
+    if (pp.received < pp.states.size())             return std::nullopt;
 
     if (!verify(block.piece_index, pp.data)) {
-        for (auto& s : pp.blocks) s.state = BlockState::Missing;
+        for (auto& s : pp.states) s = BlockState::Missing;
         pp.received = 0;
         return std::nullopt;
     }
@@ -77,11 +77,25 @@ std::optional<CompletedPiece> PieceManager::on_block(const Block& block) {
     return done;
 }
 
+void PieceManager::release(std::span<const BlockRequest> reqs) {
+    for (const auto& req : reqs) {
+        auto it = active_.find(req.piece_index);
+        if (it == active_.end()) continue;           // piece completed since
+
+        PartialPiece& pp = it->second;
+        const uint32_t b = req.offset / kBlockSize;
+        assert(req.offset % kBlockSize == 0);        // verifying our own request
+        if (b >= pp.states.size()) continue;
+
+        if (pp.states[b] == BlockState::Requested)
+            pp.states[b] = BlockState::Missing;
+    }
+}
+
 std::optional<BlockRequest> PieceManager::next_missing(uint32_t index, PartialPiece& pp) const {
-    for (uint32_t b = 0; b < pp.blocks.size(); ++b) {
-        if (pp.blocks[b].state != BlockState::Missing) continue;
-        pp.blocks[b].state   = BlockState::Requested;
-        pp.blocks[b].sent_at = std::chrono::steady_clock::now();
+    for (uint32_t b = 0; b < pp.states.size(); ++b) {
+        if (pp.states[b] != BlockState::Missing) continue;
+        pp.states[b] = BlockState::Requested;
 
         uint32_t offset = b * kBlockSize;
         uint32_t length = static_cast<uint32_t>(std::min<uint64_t>(
@@ -89,15 +103,6 @@ std::optional<BlockRequest> PieceManager::next_missing(uint32_t index, PartialPi
         return BlockRequest{.piece_index = index, .offset = offset, .length = length};
     }
     return std::nullopt;
-}
-
-// called periodically to stop stalls
-void PieceManager::requeue_stale(const std::chrono::seconds timeout) {
-    const auto cutoff = std::chrono::steady_clock::now() - timeout;
-    for (auto &pp: active_ | std::views::values)
-        for (auto&[state, sent_at] : pp.blocks)
-            if (state == BlockState::Requested && sent_at < cutoff)
-                state = BlockState::Missing;
 }
 
 bool PieceManager::is_complete() const {
@@ -120,7 +125,7 @@ PieceManager::PartialPiece& PieceManager::activate(uint32_t index) {
     PartialPiece pp;
     const uint64_t len = piece_size(torrent_, index);
     pp.data.resize(len);
-    pp.blocks.resize((len + kBlockSize - 1) / kBlockSize);
+    pp.states.resize((len + kBlockSize - 1) / kBlockSize);
     return active_.emplace(index, std::move(pp)).first->second;
 }
 
