@@ -499,20 +499,18 @@ void PeerManager::handle_message(uint32_t peer_id, const std::vector<uint8_t>& m
 
             log(LogLevel::Trace, "peer {} <- piece {} off {} ({} bytes)",
                 peer_id, index, begin, block.data.size());
-            if (!c.pending.empty()) {
-                const auto length = static_cast<uint32_t>(block.data.size());
-                const auto match = std::ranges::find_if(c.pending, [&](const PendingRequest& p) {
-                    return p.req.piece_index == index && p.req.offset == begin && p.req.length == length;
-                });
-                if (match != c.pending.end()) {
-                    c.pending.erase(match);
-                    c.snubbed = false;
-                } else
-                    log(LogLevel::Trace, "peer {} <- piece {} off {}: not pending (late or unrequested)",
-                        peer_id, index, begin);
+            const auto length = static_cast<uint32_t>(block.data.size());
+            const auto match = std::ranges::find_if(c.pending, [&](const PendingRequest& p) {
+                return p.req.piece_index == index && p.req.offset == begin && p.req.length == length;
+            });
+            if (match != c.pending.end()) {
+                c.pending.erase(match);
+                c.snubbed = false;
 
                 out.push_back({.type = PeerEvent::Piece, .peer_id = peer_id, .block = std::move(block)});
-            }
+            } else
+                log(LogLevel::Debug, "peer {} <- piece {} off {}: not pending (late or unrequested)",
+                    peer_id, index, begin);
             break;
         }
 
