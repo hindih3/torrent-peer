@@ -82,7 +82,7 @@ if(TP_BUILD_TESTS)
             set_tests_properties(swarm-${scenario} PROPERTIES LABELS swarm TIMEOUT 60)
         endforeach()
 
-        set_tests_properties(swarm-choke swarm-disconnect swarm-timeout swarm-bad-data
+        set_tests_properties(swarm-choke swarm-disconnect swarm-bad-data
                 PROPERTIES WILL_FAIL TRUE)
     endif()
 endif()

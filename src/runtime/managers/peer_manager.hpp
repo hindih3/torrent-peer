@@ -36,7 +36,6 @@ struct PeerConnection {
 
     bool got_bitfield = false;
 
-    int outstanding = 0;
     std::vector<PendingRequest> pending;
 
     Bitfield             has_pieces;
