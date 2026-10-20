@@ -92,6 +92,7 @@ void Session::run(const std::atomic<bool>& shutdown) {
             const auto stale = take_stale(c.pending, cutoff);
             if (stale.empty()) continue;
             log(LogLevel::Debug, "peer {}: {} request(s) timed out", id, stale.size());
+            c.snubbed = true;
             pieces_.release(stale);
         }
 
@@ -108,12 +109,20 @@ void Session::run(const std::atomic<bool>& shutdown) {
         // how much bandwidth is available.
         const auto& availability = peers_.get_piece_frequency();
         for (auto& [id, c] : peers_.connections()) {
-            if (c.peer_choking) continue;
+            if (c.peer_choking || c.snubbed) continue;
             while (c.pending.size() < kPipelineDepth) {
                 auto req = pieces_.pick_block(c.has_pieces, availability);
                 if (!req) break;
                 peers_.send_request(id, *req);
             }
+        }
+
+        // Snubbed peers go second and get one request at a time, so they only
+        // get blocks no healthy peer took, and a piece message can clear the snub.
+        for (auto& [id, c] : peers_.connections()) {
+            if (c.peer_choking || !c.snubbed || !c.pending.empty()) continue;
+            if (auto req = pieces_.pick_block(c.has_pieces, availability))
+                peers_.send_request(id, *req);
         }
 
         if (const int64_t elapsed = ms_since(last_report); elapsed >= 1000) {
