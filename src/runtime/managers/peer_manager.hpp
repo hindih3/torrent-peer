@@ -17,10 +17,16 @@
 #include "core/types.hpp"
 
 struct PeerEvent {
-    enum Type { Unchoke, Piece, Dropped, Request, Joined } type;
+    enum Type { Choke, Unchoke, Piece, Dropped, Request, Joined } type;
     uint32_t     peer_id;
     Block        block;    // valid when type == Piece
     BlockRequest req{};    // valid when type == Request
+    std::vector<BlockRequest> released{};   // valid when type == Choked or Dropped
+};
+
+struct PendingRequest {
+    BlockRequest req{};
+    std::chrono::steady_clock::time_point sent_at;
 };
 
 struct PeerConnection {
@@ -36,6 +42,7 @@ struct PeerConnection {
     bool got_bitfield = false;
 
     int outstanding = 0;
+    std::vector<PendingRequest> pending;
 
     Bitfield             has_pieces;
     std::vector<uint8_t> read_buffer;

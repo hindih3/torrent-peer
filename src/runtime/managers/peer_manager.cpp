@@ -1,5 +1,6 @@
 #include "peer_manager.hpp"
 
+#include <algorithm>
 #include <cassert>
 #include <charconv>
 #include <cstring>
@@ -78,6 +79,13 @@ namespace {
         out.assign(buf.begin() + 4, buf.begin() + 4 + len);
         buf.erase(buf.begin(), buf.begin() + 4 + len);
         return true;
+    }
+
+    std::vector<BlockRequest> requests_of(const std::vector<PendingRequest>& pending) {
+        std::vector<BlockRequest> out;
+        out.reserve(pending.size());
+        for (const auto& p : pending) out.push_back(p.req);
+        return out;
     }
 }
 
@@ -356,8 +364,16 @@ std::vector<PeerEvent> PeerManager::handle_events(const std::span<pollfd> pfds) 
         apply_availability(it->second.has_pieces, -1);
         known_.erase(key(it->second.peer));
 
+        // record pending requests before dropping peer, so
+        // PieceManager is able to know what requests to reset
+        events.push_back({
+            .type = PeerEvent::Dropped,
+            .peer_id = id,
+            .block = {},
+            .req = {},
+            .released = requests_of(it->second.pending)
+        });
         conns_.erase(it);
-        events.push_back({.type = PeerEvent::Dropped, .peer_id = id, .block = {}, .req = {}});
     }
 
     // 4. Expire handshakes and connects that took too long.
@@ -389,12 +405,20 @@ void PeerManager::handle_message(uint32_t peer_id, const std::vector<uint8_t>& m
     size_t payload_len = msg.size() - 1;
 
     switch (id) {
-        case MsgChoke:
+        case MsgChoke: {
             log(LogLevel::Trace, "peer {} <- choke", peer_id);
             c.peer_choking = true;
-            c.outstanding  = 0;
+            // record requests before clearing pending vector
+            out.push_back({
+                .type = PeerEvent::Choke,
+                .peer_id = peer_id,
+                .block = {},
+                .req = {},
+                .released = requests_of(c.pending)
+            });
+            c.pending.clear();
             break;
-
+        }
         case MsgUnchoke:
             log(LogLevel::Trace, "peer {} <- unchoke", peer_id);
             c.peer_choking = false;
@@ -475,8 +499,19 @@ void PeerManager::handle_message(uint32_t peer_id, const std::vector<uint8_t>& m
 
             log(LogLevel::Trace, "peer {} <- piece {} off {} ({} bytes)",
                 peer_id, index, begin, block.data.size());
-            if (c.outstanding > 0) --c.outstanding;
-            out.push_back({PeerEvent::Piece, peer_id, std::move(block)});
+            if (!c.pending.empty()) {
+                const auto length = static_cast<uint32_t>(block.data.size());
+                const auto match = std::ranges::find_if(c.pending, [&](const PendingRequest& p) {
+                    return p.req.piece_index == index && p.req.offset == begin && p.req.length == length;
+                });
+                if (match != c.pending.end())
+                    c.pending.erase(match);
+                else
+                    log(LogLevel::Trace, "peer {} <- piece {} off {}: not pending (late or unrequested)",
+                        peer_id, index, begin);
+
+                out.push_back({.type = PeerEvent::Piece, .peer_id = peer_id, .block = std::move(block)});
+            }
             break;
         }
 
@@ -543,7 +578,7 @@ void PeerManager::send_unchoke(uint32_t peer_id) {
 void PeerManager::send_request(uint32_t peer_id, const BlockRequest& req) {
     auto it = conns_.find(peer_id);
     if (it == conns_.end()) return;
-    ++it->second.outstanding;
+    it->second.pending.push_back({.req = req, .sent_at = std::chrono::steady_clock::now()});
     log(LogLevel::Trace, "peer {} -> request piece {} off {} len {}",
         peer_id, req.piece_index, req.offset, req.length);
     send_to(peer_id, build_request(req));
