@@ -12,6 +12,13 @@
 #include "core/types.hpp"
 #include "core/bitfield.hpp"
 
+enum class BlockStatus { Incomplete, Rejected,  PieceVerified, PieceFailed};
+
+struct BlockResult {
+    BlockStatus status = BlockStatus::Incomplete;
+    CompletedPiece piece{}; // filled on Verified / Failed
+};
+
 class PieceManager {
 public:
     explicit PieceManager(const TorrentFile& torrent);
