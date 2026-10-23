@@ -160,11 +160,21 @@ void Session::dispatch(const PeerEvent& ev) {
 
 void Session::on_piece(const PeerEvent& ev) {
     downloaded_ += ev.block.data.size();
-    if (auto done = pieces_.on_block(ev.block)) {
-        disk_.write_piece(*done);
-        peers_.broadcast_have(done->index);
-        log(LogLevel::Debug, "piece {} complete & verified ({}/{})",
-            done->index, pieces_.completed(), pieces_.total());
+
+    switch (auto [status, piece] = pieces_.on_block(ev.block); status) {
+        case BlockStatus::Rejected:
+        case BlockStatus::Incomplete:
+            break;
+        case BlockStatus::PieceVerified:
+            disk_.write_piece(piece);
+            peers_.broadcast_have(piece.index);
+            log(LogLevel::Debug, "piece {} complete & verified ({}/{})",
+                piece.index, pieces_.completed(), pieces_.total());
+            break;
+        case BlockStatus::PieceFailed:
+            log(LogLevel::Warn, "piece {} failed ({}/{})",
+                piece.index, pieces_.completed(), pieces_.total());
+            break;
     }
 }
 
