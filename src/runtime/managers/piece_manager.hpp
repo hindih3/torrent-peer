@@ -31,7 +31,7 @@ public:
 
     // file an arrived block; if it completes and verifies a piece,
     // return it (moved out) for the caller to write to disk, else nullopt
-    std::optional<CompletedPiece> on_block(const Block& block);
+    BlockResult on_block(const Block& block);
 
     // return given-up requests to the pool: each block still Requested goes
     // back to Missing; blocks already Received, or in pieces that have since
