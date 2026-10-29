@@ -23,11 +23,12 @@ class PieceManager {
 public:
     explicit PieceManager(const TorrentFile& torrent);
 
-    // given a peer's bitfield, return the next block to
-    // request from them using a rarest-first algorithm,
-    // or nullopt if they have nothing we still need
+    // Given a peer's bitfield, return the next block to request using
+    // a rarest-first algorithm, or nullopt if there's nothing we still
+    // need. Pieces whose owner differs from 'tag' are skipped.
     std::optional<BlockRequest> pick_block(const Bitfield& peer_has,
-                                           const std::vector<uint16_t>& availability);
+                                           const std::vector<uint16_t>& availability,
+                                           uint32_t tag);
 
     // file an arrived block; if it completes and verifies a piece,
     // return it (moved out) for the caller to write to disk, else nullopt
@@ -45,17 +46,21 @@ public:
     const Bitfield& have_bitfield() const { return have_; }
     bool have_piece(uint32_t index) const { return have_.get(index); }
     uint64_t bytes_left() const { return torrent_.total_length - have_bytes_; }
-    uint32_t completed() const { return have_count_; }
-    uint32_t total()     const { return piece_count_; }
-    size_t   active()    const { return active_.size(); }
+    uint32_t completed()  const { return have_count_; }
+    uint32_t total()      const { return piece_count_; }
+    size_t   active()     const { return active_.size(); }
 
 private:
     enum class BlockState { Missing, Requested, Received };
 
     struct PartialPiece {
-        std::vector<uint8_t>   data;
+        std::vector<uint8_t> data;
         std::vector<BlockState> states;
-        uint32_t               received = 0;
+        uint32_t received = 0;
+
+        // opaque tag set by the caller. When filled, pick_block()
+        // only offers this piece to a caller passing the same tag
+        std::optional<uint32_t> owner;
     };
 
     std::optional<BlockRequest> next_missing(uint32_t index, PartialPiece& pp) const;
