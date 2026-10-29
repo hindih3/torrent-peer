@@ -111,7 +111,7 @@ void Session::run(const std::atomic<bool>& shutdown) {
         for (auto& [id, c] : peers_.connections()) {
             if (c.peer_choking || c.snubbed) continue;
             while (c.pending.size() < kPipelineDepth) {
-                auto req = pieces_.pick_block(c.has_pieces, availability);
+                auto req = pieces_.pick_block(c.has_pieces, availability, id);
                 if (!req) break;
                 peers_.send_request(id, *req);
             }
@@ -121,7 +121,7 @@ void Session::run(const std::atomic<bool>& shutdown) {
         // get blocks no healthy peer took, and a piece message can clear the snub.
         for (auto& [id, c] : peers_.connections()) {
             if (c.peer_choking || !c.snubbed || !c.pending.empty()) continue;
-            if (auto req = pieces_.pick_block(c.has_pieces, availability))
+            if (auto req = pieces_.pick_block(c.has_pieces, availability, id))
                 peers_.send_request(id, *req);
         }
 

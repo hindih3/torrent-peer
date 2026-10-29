@@ -15,11 +15,14 @@ PieceManager::PieceManager(const TorrentFile& torrent) :
 
 std::optional<BlockRequest>
 PieceManager::pick_block(const Bitfield& peer_has,
-                         const std::vector<uint16_t>& availability) {
-    // finish in-progress pieces first
-    for (auto& [index, pp] : active_)
-        if (peer_has.get(index))
-            if (auto r = next_missing(index, pp)) return r;
+                         const std::vector<uint16_t>& availability,
+                         const uint32_t tag) {
+    // finish in-progress pieces first, skipping ones reserved for someone else
+    for (auto& [index, pp] : active_) {
+        if (!peer_has.get(index)) continue;
+        if (pp.owner && *pp.owner != tag) continue;
+        if (auto r = next_missing(index, pp)) return r;
+    }
 
     // scan all eligible new pieces, tracking the rarest and collecting ties
     uint16_t best = std::numeric_limits<uint16_t>::max();
