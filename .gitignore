@@ -20,4 +20,4 @@ leak-*
 timeout-*
 
 # claude
-/.claude/worktrees/
+/.claude/
