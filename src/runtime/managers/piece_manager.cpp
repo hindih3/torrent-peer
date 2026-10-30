@@ -60,12 +60,12 @@ BlockResult PieceManager::on_block(const Block& block) {
     size_t end = block.offset + block.data.size();
     if (b >= pp.states.size())                      return {Rejected};
     if (end > pp.data.size())                       return {Rejected};
+    if (pp.states[b] == BlockState::Received)       return {Rejected};
 
     std::memcpy(pp.data.data() + block.offset,
                 block.data.data(), block.data.size());
 
-    // Guard against a duplicate delivery double-counting the block.
-    if (pp.states[b] != BlockState::Received) ++pp.received;
+    ++pp.received;
     pp.states[b] = BlockState::Received;
 
     if (pp.received < pp.states.size())             return {Incomplete};
