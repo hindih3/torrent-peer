@@ -34,6 +34,7 @@ add_library(torrent_peer_lib STATIC
         src/metainfo/parser.cpp
         src/metainfo/torrent.cpp
         src/runtime/session.cpp
+        src/runtime/managers/ban_manager.cpp
         src/runtime/managers/disk_manager.cpp
         src/runtime/managers/peer_manager.cpp
         src/runtime/managers/piece_manager.cpp
