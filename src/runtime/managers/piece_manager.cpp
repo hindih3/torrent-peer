@@ -47,17 +47,19 @@ PieceManager::pick_block(const Bitfield& peer_has,
 }
 
 BlockResult PieceManager::on_block(const Block& block) {
-    if (block.piece_index >= piece_count_)          return {BlockStatus::Rejected};
-    if (have_.get(block.piece_index))               return {BlockStatus::Rejected};
+    using enum BlockStatus;
+    if (block.piece_index >= piece_count_)          return {Rejected};
+    if (have_.get(block.piece_index))               return {Rejected};
 
     auto it = active_.find(block.piece_index);
-    if (it == active_.end())                        return {BlockStatus::Rejected};
+    if (it == active_.end())                        return {Rejected};
     PartialPiece& pp = it->second;
 
-    if (block.offset % kBlockSize != 0)             return {BlockStatus::Rejected};
+    if (block.offset % kBlockSize != 0)             return {Rejected};
     uint32_t b = block.offset / kBlockSize;
-    if (b >= pp.states.size())                      return {BlockStatus::Rejected};
-    if (block.offset + block.data.size() > pp.data.size()) return {BlockStatus::Rejected};
+    size_t end = block.offset + block.data.size();
+    if (b >= pp.states.size())                      return {Rejected};
+    if (end > pp.data.size())                       return {Rejected};
 
     std::memcpy(pp.data.data() + block.offset,
                 block.data.data(), block.data.size());
@@ -66,19 +68,19 @@ BlockResult PieceManager::on_block(const Block& block) {
     if (pp.states[b] != BlockState::Received) ++pp.received;
     pp.states[b] = BlockState::Received;
 
-    if (pp.received < pp.states.size())             return {BlockStatus::Incomplete};
+    if (pp.received < pp.states.size())             return {Incomplete};
 
     if (!verify(block.piece_index, pp.data)) {
         for (auto& s : pp.states) s = BlockState::Missing;
         pp.received = 0;
         // copied, not moved: pp.data stays allocated for the retry
-        return {BlockStatus::PieceFailed, {block.piece_index, pp.data}};
+        return {PieceFailed, {block.piece_index, pp.data}};
     }
 
     CompletedPiece done{block.piece_index, std::move(pp.data)};
     active_.erase(it);
     mark_have(block.piece_index);
-    return {BlockStatus::PieceVerified, std::move(done)};
+    return {PieceVerified, std::move(done)};
 }
 
 void PieceManager::release(std::span<const BlockRequest> reqs) {
