@@ -87,15 +87,16 @@ BEHAVIOURS = {
 
 
 class FakePeer:
-    def __init__(self, behaviour, data, corrupt, info_hash):
+    def __init__(self, behaviour, data, corrupt, info_hash, host):
         assert behaviour in BEHAVIOURS
         self.behaviour = behaviour
         self.data = corrupt if behaviour == "BadData" else data
         self.info_hash = info_hash
+        self.host = host
 
         # the kernel picks the port, so scenarios never fight over fixed ones
         self.listener = socket.socket()
-        self.listener.bind(("127.0.0.1", 0))
+        self.listener.bind((host, 0))
         self.listener.listen(1)
         self.port = self.listener.getsockname()[1]
 
@@ -239,12 +240,15 @@ SCENARIOS = [
 
 def run_scenario(name, behaviours, limit, shows, client, torrent_path, work, data, corrupt, info_hash):
     print(f"\n== {name}: {shows}")
-    peers = [FakePeer(b, data, corrupt, info_hash) for b in behaviours]
+    # one loopback address per peer (Linux routes all of 127.0.0.0/8 to lo),
+    # so the client sees distinct IPs and an IP ban hits only the peer it means
+    peers = [FakePeer(b, data, corrupt, info_hash, f"127.0.0.{i + 2}")
+             for i, b in enumerate(behaviours)]
 
     download_dir = os.path.join(work, name)
     args = [client, torrent_path, download_dir, "--no-tracker"]
     for p in peers:
-        args += ["--peer", f"127.0.0.1:{p.port}"]
+        args += ["--peer", f"{p.host}:{p.port}"]
 
     started = time.monotonic()
     proc = subprocess.Popen(args, stderr=subprocess.PIPE)
@@ -302,7 +306,7 @@ def run_scenario(name, behaviours, limit, shows, client, torrent_path, work, dat
     check(exit_code == 0, f"{name}: client exited cleanly (code {exit_code})")
 
     for p in peers:
-        print(f"      peer :{p.port:<5} {p.behaviour:<9} {p.requests:>6} requests, "
+        print(f"      peer {p.host}:{p.port:<5} {p.behaviour:<9} {p.requests:>6} requests, "
               f"{p.served:>6} answered, {p.link}")
         if p.conn:
             p.conn.close()
