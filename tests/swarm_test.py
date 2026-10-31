@@ -5,6 +5,9 @@ Each fake peer is a seeder with a scripted behavior, to show how the client
 copes with peers that stall, choke or lie. The fake peers serve the file
 straight from memory; the client downloads into a temporary directory.
 
+The seeding scenarios flip the roles: the client starts with the whole file
+and a fake leecher dials in and asks for it.
+
 usage: swarm_test.py <path/to/torrent-peer> [scenario]
 """
 import hashlib
@@ -30,7 +33,7 @@ MAX_BLOCK = 16384
 PIPELINE_DEPTH = 32       # session.cpp's kPipelineDepth
 GOOD_UNCHOKE_DELAY = 0.5  # lets the client fill a bad peer's pipeline first
 
-CHOKE, UNCHOKE, BITFIELD, REQUEST, PIECE = 0, 1, 5, 6, 7
+CHOKE, UNCHOKE, INTERESTED, BITFIELD, REQUEST, PIECE = 0, 1, 2, 5, 6, 7
 PROTOCOL = b"BitTorrent protocol"
 
 failures = 0
@@ -315,12 +318,173 @@ def run_scenario(name, behaviours, limit, shows, client, torrent_path, work, dat
     check(sum(p.protocol_errors for p in peers) == 0, f"{name}: no malformed messages or requests")
 
 
+# --- seeding scenarios --------------------------------------------------------
+
+MIB = 1024 * 1024
+
+FLOOD_REQUESTS = 4000             # 62.5 MiB of blocks, 15x the size of the file
+FLOOD_MEMORY_LIMIT = 16 * MIB     # generous next to any sane per-peer send cap
+FLOOD_SETTLE = 2.0                # seconds for the client to work through them
+
+
+def all_blocks():
+    return [(index, begin, min(MAX_BLOCK, piece_length(index) - begin))
+            for index in range(PIECE_COUNT)
+            for begin in range(0, piece_length(index), MAX_BLOCK)]
+
+
+def proc_status_bytes(pid, field):
+    with open(f"/proc/{pid}/status") as f:
+        for line in f:
+            if line.startswith(field + ":"):
+                return int(line.split()[1]) * 1024  # reported in kB
+    raise KeyError(field)
+
+
+class FakeLeecher:
+    """Dials the client, handshakes and gets unchoked. What it does after
+    that, including whether it ever reads again, is up to the scenario."""
+
+    def __init__(self, host, info_hash, rcvbuf=None):
+        self.info_hash = info_hash
+        self.sock = socket.socket()
+        if rcvbuf is not None:  # must be set before connect to shrink the window
+            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, rcvbuf)
+        self.sock.bind((host, 0))
+
+    # We dialed, so we speak first. Requests sent before the client's unchoke
+    # are ignored, so wait for it rather than guessing how long it takes.
+    def connect(self, port, timeout=5.0):
+        self.sock.settimeout(timeout)
+        try:
+            self.sock.connect(("127.0.0.1", port))
+            self.sock.sendall(bytes([19]) + PROTOCOL + bytes(8) + self.info_hash
+                              + b"-FL0000-".ljust(20, b"-") + message(INTERESTED))
+            buf = bytearray()
+            while len(buf) < 68:
+                buf += self.recv_or_eof()
+            if buf[0] != 19 or buf[1:20] != PROTOCOL or buf[28:48] != self.info_hash:
+                return False
+            del buf[:68]
+            while True:
+                while len(buf) < 4:
+                    buf += self.recv_or_eof()
+                (length,) = struct.unpack(">I", buf[:4])
+                while len(buf) < 4 + length:
+                    buf += self.recv_or_eof()
+                if length and buf[4] == UNCHOKE:
+                    return True
+                del buf[:4 + length]
+        except (OSError, EOFError):
+            return False
+
+    def recv_or_eof(self):
+        chunk = self.sock.recv(65536)
+        if not chunk:
+            raise EOFError
+        return chunk
+
+    def close(self):
+        self.sock.close()
+
+
+def start_seeder(client, torrent_path, download_dir, data):
+    """Starts the client with the whole file already on disk and waits until it
+    has rechecked it and is seeding. Returns (proc, port, log_path)."""
+    os.makedirs(download_dir)
+    with open(os.path.join(download_dir, "swarm.bin"), "wb") as f:
+        f.write(data)
+
+    # ask the kernel for a free port, then hand it to the client
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+
+    # ASan keeps freed memory in a quarantine (256 MiB by default) that would
+    # swamp any memory measurement; this is ignored by non-ASan builds
+    env = dict(os.environ)
+    env["ASAN_OPTIONS"] = env.get("ASAN_OPTIONS", "") + ":quarantine_size_mb=0"
+
+    log_path = download_dir + ".log"
+    with open(log_path, "wb") as log:
+        proc = subprocess.Popen([client, torrent_path, download_dir, "--no-tracker",
+                                 "--port", str(port)], stderr=log, env=env)
+
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and proc.poll() is None:
+        with open(log_path, "rb") as f:
+            if b"seeding" in f.read():
+                return proc, port, log_path
+        time.sleep(0.05)
+    return None, port, log_path
+
+
+def stop_client(proc):
+    proc.send_signal(signal.SIGINT)
+    try:
+        return proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        return proc.wait()
+
+
+# A leecher that pipelines thousands of requests and never reads a byte. Each
+# request is 17 bytes but asks for a 16 KiB block, so it costs the peer almost
+# nothing to make the client queue tens of MiB for it. However the client
+# defends itself (capping what it queues per peer, ignoring requests past a
+# limit, or dropping the peer), its memory should stay roughly flat.
+def run_write_flood(name, client, torrent_path, work, data, info_hash):
+    proc, port, log_path = start_seeder(client, torrent_path, os.path.join(work, name), data)
+    if proc is None:
+        check(False, f"{name}: client never started seeding (log: {log_path})")
+        return
+
+    # tiny receive window so the kernel can't soak up much on our behalf
+    leecher = FakeLeecher("127.0.0.2", info_hash, rcvbuf=4096)
+    if not leecher.connect(port):
+        check(False, f"{name}: handshake with the client failed")
+        leecher.close()
+        stop_client(proc)
+        return
+
+    blocks = all_blocks()
+    flood = b"".join(message(REQUEST, struct.pack(">III", *blocks[k % len(blocks)]))
+                     for k in range(FLOOD_REQUESTS))
+    asked = FLOOD_REQUESTS * MAX_BLOCK
+
+    before = proc_status_bytes(proc.pid, "VmRSS")
+    try:
+        leecher.sock.sendall(flood)
+        sent = "all requests sent"
+    except socket.timeout:
+        sent = "client stopped reading requests"   # backpressure; fine
+    except OSError:
+        sent = "client hung up"                     # dropping us is fine too
+    time.sleep(FLOOD_SETTLE)
+    grew = proc_status_bytes(proc.pid, "VmHWM") - before
+
+    check(grew <= FLOOD_MEMORY_LIMIT,
+          f"{name}: client memory grew {grew / MIB:.1f} MiB for one peer that asked for "
+          f"{asked / MIB:.1f} MiB and never read (limit {FLOOD_MEMORY_LIMIT // MIB} MiB)")
+    print(f"      {sent}")
+
+    leecher.close()
+    exit_code = stop_client(proc)
+    check(exit_code == 0, f"{name}: client exited cleanly (code {exit_code})")
+
+
+SEED_SCENARIOS = [
+    ("write-flood", run_write_flood,
+     "a peer that floods requests and never reads shouldn't make the client queue without limit"),
+]
+
+
 def main():
     if len(sys.argv) < 2:
         sys.exit("usage: swarm_test.py <path/to/torrent-peer> [scenario]")
     client = os.path.abspath(sys.argv[1])
     only = sys.argv[2] if len(sys.argv) > 2 else None
-    if only is not None and only not in [s[0] for s in SCENARIOS]:
+    if only is not None and only not in [s[0] for s in SCENARIOS + SEED_SCENARIOS]:
         sys.exit(f"unknown scenario: {only}")
 
     data, torrent, info_hash = make_torrent()
@@ -335,6 +499,11 @@ def main():
             if only is None or only == name:
                 run_scenario(name, behaviours, limit, shows, client, torrent_path,
                              work, data, corrupt, info_hash)
+
+        for name, run, shows in SEED_SCENARIOS:
+            if only is None or only == name:
+                print(f"\n== {name}: {shows}")
+                run(name, client, torrent_path, work, data, info_hash)
 
     print(f"\n{failures} failure(s)")
     sys.exit(failures != 0)
