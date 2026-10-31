@@ -147,7 +147,11 @@ void Session::run(const std::atomic<bool>& shutdown) {
 
 void Session::dispatch(const PeerEvent& ev) {
     switch (ev.type) {
-        case PeerEvent::Joined:  greet(ev.peer_id); break;
+        case PeerEvent::Joined:
+            if (auto it = peers_.connections().find(ev.peer_id); it != peers_.connections().end())
+                bans_.on_join(ev.peer_id, it->second.peer.host);
+            greet(ev.peer_id);
+            break;
         case PeerEvent::Piece:   on_piece(ev);      break;
         case PeerEvent::Request: on_request(ev);    break;
 
@@ -161,7 +165,14 @@ void Session::dispatch(const PeerEvent& ev) {
 void Session::on_piece(const PeerEvent& ev) {
     downloaded_ += ev.block.data.size();
 
-    switch (auto [status, piece] = pieces_.on_block(ev.block); status) {
+    auto [status, piece] = pieces_.on_block(ev.block);
+
+    // before the verdict: the block that completes a piece is one of its senders
+    if (status != BlockStatus::Rejected)
+        bans_.on_block(ev.peer_id, ev.block);
+
+    // bans are only logged for now; nothing enforces them yet
+    switch (status) {
         case BlockStatus::Rejected:
         case BlockStatus::Incomplete:
             break;
@@ -170,10 +181,14 @@ void Session::on_piece(const PeerEvent& ev) {
             peers_.broadcast_have(piece.index);
             log(LogLevel::Debug, "piece {} complete & verified ({}/{})",
                 piece.index, pieces_.completed(), pieces_.total());
+            for (const auto& host : bans_.on_piece_verified(piece))
+                log(LogLevel::Warn, "would ban {}: mismatching block in piece {}", host, piece.index);
             break;
         case BlockStatus::PieceFailed:
             log(LogLevel::Warn, "piece {} failed ({}/{})",
                 piece.index, pieces_.completed(), pieces_.total());
+            for (const auto& host : bans_.on_piece_failed(piece))
+                log(LogLevel::Warn, "would ban {}: sole sender of failed piece {}", host, piece.index);
             break;
     }
 }

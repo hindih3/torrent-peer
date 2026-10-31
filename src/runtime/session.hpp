@@ -4,6 +4,7 @@
 #include "managers/peer_manager.hpp"
 #include "managers/disk_manager.hpp"
 #include "managers/tracker_manager.hpp"
+#include "managers/ban_manager.hpp"
 #include "metainfo/torrent.hpp"
 
 class Session {
@@ -28,6 +29,7 @@ private:
     PieceManager pieces_;
     PeerManager peers_;
     TrackerManager trackers_;
+    BanManager bans_;
 
     bool use_trackers_;
     bool completed_  = false;
