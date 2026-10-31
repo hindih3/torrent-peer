@@ -97,6 +97,11 @@ public:
                     const std::vector<uint8_t>& data);
     void broadcast_have(uint32_t index);
 
+    // drop every connection from 'host' and refuse it from now on, inbound
+    // and outbound. Returns the Dropped events for the caller to dispatch
+    std::vector<PeerEvent> ban(const std::string& host);
+    bool is_banned(const std::string& host) const { return banned_.contains(host); }
+
     static void queue(PeerConnection& c, const std::vector<uint8_t>& msg);
 
     std::unordered_map<uint32_t, PeerConnection>& connections() { return conns_; }
@@ -119,6 +124,7 @@ private:
     std::vector<PendingOutbound> outbound_;
     std::deque<Peer>             candidates_;   // addresses waiting for a free slot
     std::unordered_set<std::string> known_;     // "host:port" queued, dialing or connected
+    std::unordered_set<std::string> banned_;    // hosts refused for sending bad data
 
     const TorrentFile& torrent_;
     std::string        peer_id_;
@@ -152,4 +158,5 @@ private:
     void handle_message(uint32_t peer_id, const std::vector<uint8_t>& msg,
                         std::vector<PeerEvent>& out);
     void apply_availability(const Bitfield& bf, int delta);
+    void drop(uint32_t id, std::vector<PeerEvent>& out);
 };
