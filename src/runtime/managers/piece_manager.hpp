@@ -40,6 +40,10 @@ public:
     // exactly one peer's pending list (breaks with endgame mode)
     void release(std::span<const BlockRequest> reqs);
 
+    // reserve an active piece for 'owner', or open it to everyone again
+    // with nullopt. Does nothing if the piece isn't active
+    void set_owner(uint32_t index, std::optional<uint32_t> owner);
+
     bool is_complete() const;
     bool recheck(uint32_t index, const std::vector<uint8_t>& data);
 
