@@ -88,11 +88,12 @@ tools, such as `LLVMFuzzerTestOneInput`, are excluded in `.clang-tidy`.
   - `TrackerManager` UDP tracker communication
   - `PeerManager`    peer connections / wire protocol
   - `PieceManager`   piece selection and verification
+  - `BanManager`     bad-data attribution and bans
   - `DiskManager`    file layout and disk I/O
 
 
 * **Managers never call each other.** Session is the only code that touches more
-  than one, so every interaction between the managers is written in about 200 lines.
+  than one, so every interaction between the managers is written in about 250 lines.
   Take an arriving block: Session's `on_piece()` passes it to `pieces_.on_block()`, which
   returns a verified piece if that block completed one. Session hands the piece
   to `disk_.write_piece()`, then calls `peers_.broadcast_have()`.
@@ -132,6 +133,18 @@ tools, such as `LLVMFuzzerTestOneInput`, are excluded in `.clang-tidy`.
   - `parse_torrent()` then asks "can this be a real torrent?" It rejects unsafe
     paths (`..`, separators, NUL), piece counts that don't match the total
     length, and lengths that overflow.
+
+
+* **Bans peers that send bad data, without punishing the honest ones.** A piece's
+  hash only says the whole piece is wrong, not which block, so every block is
+  recorded with the peer that sent it. If one peer sent all of a failing piece, it's
+  banned by IP on the spot. Otherwise the failed copy is kept as evidence, and once
+  a good copy of that piece verifies, it's compared block by block: only the peers
+  whose blocks don't match are banned. Good peers that happened to share a piece with
+  a bad one are never caught in the crossfire. In the `bad-data` test (one honest
+  seeder, one peer sending corrupt blocks), the client used to finish 1 of 17 pieces
+  in 30 s while transferring about 4 GiB for a 4 MiB file; it now bans the bad peer
+  and finishes in under a second.
 
 
 * **RAII resource ownership.** Every socket and file descriptor is wrapped in
