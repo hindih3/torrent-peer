@@ -98,6 +98,12 @@ void PieceManager::release(std::span<const BlockRequest> reqs) {
     }
 }
 
+void PieceManager::set_owner(const uint32_t index, const std::optional<uint32_t> owner) {
+    auto it = active_.find(index);
+    if (it == active_.end()) return;                 // piece completed since
+    it->second.owner = owner;
+}
+
 std::optional<BlockRequest> PieceManager::next_missing(uint32_t index, PartialPiece& pp) const {
     for (uint32_t b = 0; b < pp.states.size(); ++b) {
         if (pp.states[b] != BlockState::Missing) continue;
