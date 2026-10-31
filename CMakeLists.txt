@@ -76,12 +76,15 @@ if(TP_BUILD_TESTS)
 
     find_package(Python3 COMPONENTS Interpreter)
     if(Python3_Interpreter_FOUND)
-        foreach(scenario baseline choke disconnect timeout silent bad-data)
+        foreach(scenario baseline choke disconnect timeout silent bad-data write-flood)
             add_test(NAME swarm-${scenario}
                     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/swarm_test.py
                     $<TARGET_FILE:torrent-peer> ${scenario})
             set_tests_properties(swarm-${scenario} PROPERTIES LABELS swarm TIMEOUT 60)
         endforeach()
+
+        set_tests_properties(swarm-write-flood
+                PROPERTIES WILL_FAIL TRUE)
     endif()
 endif()
 
