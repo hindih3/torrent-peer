@@ -1,5 +1,6 @@
 #pragma once
 #include <atomic>
+#include <string_view>
 #include "managers/piece_manager.hpp"
 #include "managers/peer_manager.hpp"
 #include "managers/disk_manager.hpp"
@@ -20,6 +21,7 @@ private:
     void dispatch(const PeerEvent& ev);
     void on_piece(const PeerEvent& ev);
     void on_request(const PeerEvent& ev);
+    void ban(const std::string& host, std::string_view why, uint32_t index);
     void shutdown_session();
 
     const TorrentFile& torrent_;

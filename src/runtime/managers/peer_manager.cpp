@@ -152,6 +152,7 @@ void PeerManager::accept_new() {
         inet_ntop(AF_INET, &addr.sin_addr, ip, sizeof(ip));
 
         Peer peer{std::string(ip), std::to_string(ntohs(addr.sin_port))};
+        if (banned_.contains(peer.host)) continue;  // sock closes here: banned for bad data
         log(LogLevel::Debug, "inbound: {}:{}", peer.host, peer.port);
 
         inbound_.push_back({
@@ -354,27 +355,9 @@ std::vector<PeerEvent> PeerManager::handle_events(const std::span<pollfd> pfds) 
         }
     }
 
-    // 3. Remove dropped peers: subtract their pieces from the availability
-    //    counts used by rarest-first, forget their address so it can be
-    //    dialled again, and report a Dropped event.
-    for (uint32_t id : to_drop) {
-        auto it = conns_.find(id);
-        if (it == conns_.end()) continue;
-
-        apply_availability(it->second.has_pieces, -1);
-        known_.erase(key(it->second.peer));
-
-        // record pending requests before dropping peer, so
-        // PieceManager is able to know what requests to reset
-        events.push_back({
-            .type = PeerEvent::Dropped,
-            .peer_id = id,
-            .block = {},
-            .req = {},
-            .released = requests_of(it->second.pending)
-        });
-        conns_.erase(it);
-    }
+    // 3. Remove dropped peers.
+    for (uint32_t id : to_drop)
+        drop(id, events);
 
     // 4. Expire handshakes and connects that took too long.
     expire_inbound(kHandshakeTimeout);
@@ -602,6 +585,41 @@ void PeerManager::apply_availability(const Bitfield& bf, int delta) {
         if (bf.get(i)) piece_frequency_[i] += delta;
 }
 
+// Subtract the peer's pieces from the availability counts used by rarest-first,
+// forget its address so it can be dialled again, and report a Dropped event.
+void PeerManager::drop(uint32_t id, std::vector<PeerEvent>& out) {
+    auto it = conns_.find(id);
+    if (it == conns_.end()) return;
+
+    apply_availability(it->second.has_pieces, -1);
+    known_.erase(key(it->second.peer));
+
+    // record pending requests before dropping peer, so
+    // PieceManager is able to know what requests to reset
+    out.push_back({
+        .type = PeerEvent::Dropped,
+        .peer_id = id,
+        .block = {},
+        .req = {},
+        .released = requests_of(it->second.pending)
+    });
+    conns_.erase(it);
+}
+
+std::vector<PeerEvent> PeerManager::ban(const std::string& host) {
+    if (!banned_.insert(host).second) return {};    // already banned
+
+    std::vector<uint32_t> ids;
+    for (const auto& [id, c] : conns_)
+        if (c.peer.host == host) ids.push_back(id);
+
+    std::vector<PeerEvent> events;
+    for (uint32_t id : ids)
+        drop(id, events);
+    log(LogLevel::Debug, "banned {}: dropped {} connection(s)", host, ids.size());
+    return events;
+}
+
 void PeerManager::add_peers(std::vector<Peer> peers) {
     size_t added = 0;
     for (auto& p : peers) {
@@ -620,7 +638,7 @@ void PeerManager::dial_more() {
            && conns_.size() + inbound_.size() + outbound_.size() < max_peers_) {
         Peer p = std::move(candidates_.front());
         candidates_.pop_front();
-        if (!start_dial(p)) known_.erase(key(p));
+        if (banned_.contains(p.host) || !start_dial(p)) known_.erase(key(p));
     }
 }
 
@@ -725,6 +743,11 @@ void PeerManager::expire_outbound() {
 }
 
 bool PeerManager::verify_handshake(const std::array<uint8_t, 68>& hs, const Peer& peer) const {
+    // catches connections that were already mid-handshake when their host got banned
+    if (banned_.contains(peer.host)) {
+        log(LogLevel::Debug, "{}: banned, dropping", peer.host);
+        return false;
+    }
     if (hs[0] != 19 || std::memcmp(hs.data() + 1, "BitTorrent protocol", 19) != 0) {
         log(LogLevel::Debug, "{}: bad protocol header", peer.host);
         return false;

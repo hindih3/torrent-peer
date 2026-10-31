@@ -171,7 +171,6 @@ void Session::on_piece(const PeerEvent& ev) {
     if (status != BlockStatus::Rejected)
         bans_.on_block(ev.peer_id, ev.block);
 
-    // bans are only logged for now; nothing enforces them yet
     switch (status) {
         case BlockStatus::Rejected:
         case BlockStatus::Incomplete:
@@ -182,15 +181,22 @@ void Session::on_piece(const PeerEvent& ev) {
             log(LogLevel::Debug, "piece {} complete & verified ({}/{})",
                 piece.index, pieces_.completed(), pieces_.total());
             for (const auto& host : bans_.on_piece_verified(piece))
-                log(LogLevel::Warn, "would ban {}: mismatching block in piece {}", host, piece.index);
+                ban(host, "sent a mismatching block of piece", piece.index);
             break;
         case BlockStatus::PieceFailed:
             log(LogLevel::Warn, "piece {} failed ({}/{})",
                 piece.index, pieces_.completed(), pieces_.total());
             for (const auto& host : bans_.on_piece_failed(piece))
-                log(LogLevel::Warn, "would ban {}: sole sender of failed piece {}", host, piece.index);
+                ban(host, "was the sole sender of failed piece", piece.index);
             break;
     }
+}
+
+void Session::ban(const std::string& host, std::string_view why, uint32_t index) {
+    if (peers_.is_banned(host)) return;
+    log(LogLevel::Warn, "banning {}: {} {}", host, why, index);
+    for (const auto& ev : peers_.ban(host))
+        dispatch(ev);
 }
 
 void Session::on_request(const PeerEvent& ev) {

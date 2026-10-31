@@ -82,9 +82,6 @@ if(TP_BUILD_TESTS)
                     $<TARGET_FILE:torrent-peer> ${scenario})
             set_tests_properties(swarm-${scenario} PROPERTIES LABELS swarm TIMEOUT 60)
         endforeach()
-
-        set_tests_properties(swarm-bad-data
-                PROPERTIES WILL_FAIL TRUE)
     endif()
 endif()
 
