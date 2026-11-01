@@ -86,6 +86,21 @@ namespace {
         };
     }
 
+    sockaddr_in resolve(const std::string& host, const std::string& port) {
+        addrinfo hints{}, *res = nullptr;
+        hints.ai_family   = AF_INET;
+        hints.ai_socktype = SOCK_DGRAM;
+
+        if (int rc = getaddrinfo(host.c_str(), port.c_str(), &hints, &res); rc != 0)
+            throw std::runtime_error("DNS resolution failed for " + host +
+                                     ": " + gai_strerror(rc));
+
+        sockaddr_in addr{};
+        std::memcpy(&addr, res->ai_addr, sizeof addr);
+        freeaddrinfo(res);
+        return addr;
+    }
+
     UniqueFd create_udp_ipv4_socket() {
         UniqueFd sock(::socket(AF_INET, SOCK_DGRAM, 0));
         if (!sock)
@@ -241,28 +256,15 @@ uint32_t TrackerManager::next_random() {
     return dist(rng_);
 }
 
-void TrackerManager::open_socket(TrackerSession& t) {
-    addrinfo hints{}, *res;
-    hints.ai_family   = AF_INET;
-    hints.ai_socktype = SOCK_DGRAM;
-
-    log(LogLevel::Trace, "resolving {}:{}", t.address.host, t.address.port);
-
-    if (int rc = getaddrinfo(t.address.host.c_str(), t.address.port.c_str(),
-                             &hints, &res); rc != 0)
-        throw std::runtime_error("DNS resolution failed for " + t.address.host +
-                                 ": " + gai_strerror(rc));
-
+void TrackerManager::open_socket(TrackerSession& t, const sockaddr_in& addr) {
     UniqueFd sock = create_udp_ipv4_socket();
     fcntl(sock.get(), F_SETFL, fcntl(sock.get(), F_GETFL, 0) | O_NONBLOCK);
 
-    if (connect(sock.get(), res->ai_addr, res->ai_addrlen) == -1) {
+    if (connect(sock.get(), reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) == -1) {
         const int err = errno;
-        freeaddrinfo(res);
         throw std::runtime_error("connect failed for " + t.address.host +
                                  ": " + std::strerror(err));
     }
-    freeaddrinfo(res);
     t.sock = std::move(sock);
     log(LogLevel::Trace, "opened socket fd={} to {}:{}", t.sock.get(), t.address.host, t.address.port);
 }
@@ -295,7 +297,7 @@ void TrackerManager::fail_send(TrackerSession& t, const char* what) {
 void TrackerManager::send_connect(TrackerSession& t) {
     if (!t.sock) {
         try {
-            open_socket(t);
+            open_socket(t, resolve(t.address.host, t.address.port));
         } catch (const std::exception& e) {
             log(LogLevel::Debug, "connect failed for {}: {}", t.address.host, e.what());
             fail_backoff(t);
