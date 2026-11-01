@@ -59,6 +59,17 @@ cmake --build build-debug
 ctest --test-dir build-debug --output-on-failure
 ```
 
+The `write-flood` scenario measures the client's memory, which ASan inflates a lot
+(shadow memory, redzones, and its fake stack for many small allocations). For real
+numbers, run it in a plain Release build. Pass `-DTP_SANITIZE=OFF` explicitly,
+since CMake keeps the cached value otherwise:
+
+```sh
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DTP_SANITIZE=OFF
+cmake --build build
+ctest --test-dir build -R write-flood -V
+```
+
 The bencode parser also has a libFuzzer harness (requires clang). The corpus in
 `tests/corpus/parser/` holds the inputs found so far:
 
@@ -147,6 +158,20 @@ tools, such as `LLVMFuzzerTestOneInput`, are excluded in `.clang-tidy`.
   and finishes in under a second.
 
 
+* **Bounded memory per peer, even when it never reads.** A request is 17 bytes on
+  the wire but asks for a 16 KiB block, so a peer that keeps requesting and never
+  reads could make the client queue as much as it liked. Outgoing messages now sit
+  in a per-peer deque with a running byte count, and once 4 MiB is queued, further
+  requests are ignored before the block is read from disk; the peer re-requests
+  after its timeout. The check runs when Session serves a request, not when it's
+  parsed, because a whole `recv()` of requests (up to ~960) is parsed before any is
+  served. A partial `send()` only moves a cursor into the front message, where it
+  used to erase the sent bytes from the front of one flat buffer and shift
+  everything behind them. In the `write-flood` test (one leecher pipelining 4000
+  requests, 62.5 MiB of blocks, and never reading), the client's memory used to
+  grow by about 64 MiB; it now grows by 4.2 MiB.
+
+
 * **RAII resource ownership.** Every socket and file descriptor is wrapped in
   move-only `UniqueFd`, so nothing can leak or be closed twice. Managers
   have sole ownership of their `UniqueFds`; Session only takes their raw values
@@ -172,7 +197,8 @@ tools, such as `LLVMFuzzerTestOneInput`, are excluded in `.clang-tidy`.
 
 - No keep-alives are sent and idle peers are never timed out
 - A snubbed peer can hold one block for the 15 s request timeout (no endgame mode)
-- A peer's request queue and write buffer are unbounded
+- Requests that arrive while a peer's write queue is full (4 MiB) are dropped
+  rather than deferred, so that peer has to wait for its own timeout to ask again
 - DNS resolution blocks the event loop
 - One fd per file for huge torrents can potentially trigger the per-process soft limit
 
