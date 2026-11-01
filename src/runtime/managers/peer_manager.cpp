@@ -184,7 +184,7 @@ PeerManager::HandshakeResult PeerManager::advance_inbound(PendingInbound& p, std
     if (!verify_handshake(p.buffer, p.peer)) return HandshakeResult::Drop;
 
     const uint32_t id = promote(std::move(p.sock), p.peer, out);
-    queue(conns_.at(id), build_handshake(torrent_, peer_id_));
+    enqueue(conns_.at(id), build_handshake(torrent_, peer_id_));
     log(LogLevel::Debug, "handshake ok (inbound): {}:{}", p.peer.host, p.peer.port);
 
     return HandshakeResult::Promoted;
@@ -516,7 +516,7 @@ void PeerManager::send_interested_all() {
     auto msg = build_message(MsgInterested);
     for (auto &c: conns_ | std::views::values) {
         c.am_interested = true;
-        queue(c, msg);
+        enqueue(c, msg);
     }
 }
 
@@ -524,20 +524,20 @@ void PeerManager::send_interested(uint32_t peer_id) {
     auto it = conns_.find(peer_id);
     if (it == conns_.end()) return;
     it->second.am_interested = true;
-    queue(it->second, build_message(MsgInterested));
+    enqueue(it->second, build_message(MsgInterested));
 }
 
 void PeerManager::send_choke(uint32_t peer_id) {
     auto it = conns_.find(peer_id);
     if (it == conns_.end()) return;
     it->second.am_choking = true;
-    queue(it->second, build_message(MsgChoke));
+    enqueue(it->second, build_message(MsgChoke));
 }
 
 void PeerManager::send_to(uint32_t peer_id, std::vector<uint8_t> msg) {
     auto it = conns_.find(peer_id);
     if (it != conns_.end())
-        queue(it->second, std::move(msg));
+        enqueue(it->second, std::move(msg));
 }
 
 void PeerManager::send_bitfield(uint32_t peer_id, const Bitfield& our_have) {
@@ -581,10 +581,10 @@ void PeerManager::broadcast_have(uint32_t index) {
     auto msg = build_message(MsgHave, payload);
 
     for (auto &c: conns_ | std::views::values)
-        queue(c, msg);   // copy: every peer needs its own
+        enqueue(c, msg);   // copy: every peer needs its own
 }
 
-void PeerManager::queue(PeerConnection& c, std::vector<uint8_t> msg) {
+void PeerManager::enqueue(PeerConnection& c, std::vector<uint8_t> msg) {
     c.queued_bytes += msg.size();
     c.write_buffer.push_back(std::move(msg));
 }

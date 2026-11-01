@@ -105,7 +105,7 @@ public:
     bool is_banned(const std::string& host) const { return banned_.contains(host); }
     bool can_queue(uint32_t peer_id) const;
 
-    static void queue(PeerConnection& c, std::vector<uint8_t> msg);
+    static void enqueue(PeerConnection& c, std::vector<uint8_t> msg);
 
     std::unordered_map<uint32_t, PeerConnection>& connections() { return conns_; }
 
