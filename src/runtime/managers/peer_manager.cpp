@@ -18,6 +18,7 @@ namespace {
     constexpr size_t kMaxCandidates    = 1000;  // bound on queued addresses
     constexpr auto   kConnectTimeout   = std::chrono::seconds(10);
     constexpr auto   kHandshakeTimeout = std::chrono::seconds(15);
+    constexpr size_t kMaxQueuedBytes = (1 << 22); // 4 MiB
 
     UniqueFd build_listen_fd(uint16_t port) {
         UniqueFd sock(::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0));
@@ -326,6 +327,7 @@ std::vector<PeerEvent> PeerManager::handle_events(const std::span<pollfd> pfds) 
                 // freed once, when its last byte has gone to the kernel
                 c.cursor += static_cast<size_t>(w);
                 if (c.cursor == front.size()) {
+                    c.queued_bytes -= front.size();
                     c.write_buffer.pop_front();
                     c.cursor = 0;
                 }
@@ -583,6 +585,7 @@ void PeerManager::broadcast_have(uint32_t index) {
 }
 
 void PeerManager::queue(PeerConnection& c, std::vector<uint8_t> msg) {
+    c.queued_bytes += msg.size();
     c.write_buffer.push_back(std::move(msg));
 }
 
@@ -624,6 +627,12 @@ std::vector<PeerEvent> PeerManager::ban(const std::string& host) {
         drop(id, events);
     log(LogLevel::Debug, "banned {}: dropped {} connection(s)", host, ids.size());
     return events;
+}
+
+bool PeerManager::can_queue(uint32_t peer_id) const {
+    auto it = conns_.find(peer_id);
+    if (it == conns_.end()) return false;   // dropped or banned earlier in this batch
+    return it->second.queued_bytes < kMaxQueuedBytes;
 }
 
 void PeerManager::add_peers(std::vector<Peer> peers) {
