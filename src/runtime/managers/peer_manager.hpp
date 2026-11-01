@@ -41,7 +41,8 @@ struct PeerConnection {
 
     Bitfield             has_pieces;
     std::vector<uint8_t> read_buffer;
-    std::vector<uint8_t> write_buffer;
+    std::deque<std::vector<uint8_t>> write_buffer;  // one whole message per element
+    size_t cursor = 0;  // bytes of write_buffer.front() already handed to the kernel
 };
 
 enum MessageId : uint8_t {
@@ -88,7 +89,7 @@ public:
 
     void send_interested_all();
     void send_interested(uint32_t peer_id);
-    void send_to(uint32_t peer_id, const std::vector<uint8_t>& msg);
+    void send_to(uint32_t peer_id, std::vector<uint8_t> msg);
     void send_unchoke(uint32_t peer_id);
     void send_choke(uint32_t peer_id);
     void send_request(uint32_t peer_id, const BlockRequest& req);
@@ -102,7 +103,7 @@ public:
     std::vector<PeerEvent> ban(const std::string& host);
     bool is_banned(const std::string& host) const { return banned_.contains(host); }
 
-    static void queue(PeerConnection& c, const std::vector<uint8_t>& msg);
+    static void queue(PeerConnection& c, std::vector<uint8_t> msg);
 
     std::unordered_map<uint32_t, PeerConnection>& connections() { return conns_; }
 

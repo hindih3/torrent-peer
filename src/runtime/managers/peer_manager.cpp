@@ -310,9 +310,10 @@ std::vector<PeerEvent> PeerManager::handle_events(const std::span<pollfd> pfds) 
         assert(pfds[conns_at_ + k].fd == c.sock.get());
 
         // Drain queued writes first so the peer stays fed.
-        if (rev & POLLOUT) {
-            ssize_t w = ::send(c.sock.get(), c.write_buffer.data(),
-                               c.write_buffer.size(), MSG_NOSIGNAL);
+        if ((rev & POLLOUT) && !c.write_buffer.empty()) {
+            const std::vector<uint8_t>& front = c.write_buffer.front();
+            ssize_t w = ::send(c.sock.get(), front.data() + c.cursor,
+                               front.size() - c.cursor, MSG_NOSIGNAL);
             if (w < 0) {
                 if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
                     log(LogLevel::Debug, "peer {} dropped: send failed: {}",
@@ -321,8 +322,13 @@ std::vector<PeerEvent> PeerManager::handle_events(const std::span<pollfd> pfds) 
                     continue;
                 }
             } else {
-                c.write_buffer.erase(c.write_buffer.begin(),
-                                     c.write_buffer.begin() + w);
+                // a partial send only moves the cursor; the message is
+                // freed once, when its last byte has gone to the kernel
+                c.cursor += static_cast<size_t>(w);
+                if (c.cursor == front.size()) {
+                    c.write_buffer.pop_front();
+                    c.cursor = 0;
+                }
             }
         }
 
@@ -526,10 +532,10 @@ void PeerManager::send_choke(uint32_t peer_id) {
     queue(it->second, build_message(MsgChoke));
 }
 
-void PeerManager::send_to(uint32_t peer_id, const std::vector<uint8_t>& msg) {
+void PeerManager::send_to(uint32_t peer_id, std::vector<uint8_t> msg) {
     auto it = conns_.find(peer_id);
     if (it != conns_.end())
-        queue(it->second, msg);
+        queue(it->second, std::move(msg));
 }
 
 void PeerManager::send_bitfield(uint32_t peer_id, const Bitfield& our_have) {
@@ -573,11 +579,11 @@ void PeerManager::broadcast_have(uint32_t index) {
     auto msg = build_message(MsgHave, payload);
 
     for (auto &c: conns_ | std::views::values)
-        queue(c, msg);
+        queue(c, msg);   // copy: every peer needs its own
 }
 
-void PeerManager::queue(PeerConnection& c, const std::vector<uint8_t>& msg) {
-    c.write_buffer.insert(c.write_buffer.end(), msg.begin(), msg.end());
+void PeerManager::queue(PeerConnection& c, std::vector<uint8_t> msg) {
+    c.write_buffer.push_back(std::move(msg));
 }
 
 void PeerManager::apply_availability(const Bitfield& bf, int delta) {
