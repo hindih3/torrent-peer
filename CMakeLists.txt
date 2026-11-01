@@ -11,6 +11,7 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 endif()
 
 find_package(OpenSSL REQUIRED)
+find_package(Threads REQUIRED)
 
 option(TP_SANITIZE "Enable ASan/UBSan" OFF)
 option(TP_ASSERTIONS "Enable libstdc++ assertions" OFF)
@@ -47,7 +48,7 @@ target_compile_definitions(torrent_peer_lib PUBLIC
         TP_VERSION="${PROJECT_VERSION}")
 
 target_include_directories(torrent_peer_lib PUBLIC src)
-target_link_libraries(torrent_peer_lib PRIVATE OpenSSL::Crypto)
+target_link_libraries(torrent_peer_lib PRIVATE OpenSSL::Crypto Threads::Threads)
 target_compile_options(torrent_peer_lib PRIVATE -Wall -Wextra -Wpedantic)
 
 add_executable(torrent-peer src/main.cpp)

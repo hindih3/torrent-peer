@@ -15,6 +15,8 @@
 #include "core/log.hpp"
 
 namespace {
+    constexpr auto kResolvingDeadline = std::chrono::milliseconds(50);
+
     std::chrono::seconds response_timeout(const TrackerSession& t) {
         return std::chrono::seconds(15 << t.retries);   // BEP 15: 15 * 2^n
     }
@@ -186,6 +188,13 @@ std::chrono::milliseconds TrackerManager::until_next_action() const {
 
     for (const auto& t : trackers_) {
         if (t.state == TrackerState::Stopped) continue;
+        // A Resolving tracker has no deadline: its next_action is the stale time
+        // that started the lookup, already in the past. Counting it would make us
+        // return 0 and spin poll() until the lookup finishes, so check back in 50ms.
+        if (t.state == TrackerState::Resolving) {
+            soonest = std::min(soonest, now + kResolvingDeadline);
+            continue;
+        }
         soonest = std::min(soonest, t.next_action);
     }
 
