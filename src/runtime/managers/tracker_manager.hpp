@@ -5,6 +5,7 @@
 #include <vector>
 #include <array>
 #include <stdexcept>
+#include <netinet/in.h>
 #include <random>
 #include <poll.h>
 #include <span>
@@ -91,7 +92,7 @@ private:
 
     uint32_t next_random();
 
-    static void open_socket(TrackerSession& t);
+    static void open_socket(TrackerSession &t, const sockaddr_in &addr);
 
     static void fail_backoff(TrackerSession& t);
 
