@@ -6,6 +6,7 @@
 #include <array>
 #include <stdexcept>
 #include <netinet/in.h>
+#include <future>
 #include <random>
 #include <poll.h>
 #include <span>
@@ -29,6 +30,7 @@ struct TrackerAddress {
 
 enum class TrackerState {
     Disconnected,   // no valid connection_id; must connect
+    Resolving,      // DNS lookup running on a worker thread
     Connecting,     // connect sent, awaiting connection_id
     Connected,      // have connection_id, ready to announce
     Announcing,     // announce sent, awaiting response
@@ -41,6 +43,7 @@ struct TrackerSession {
     TrackerState state = TrackerState::Disconnected;
 
     UniqueFd sock;
+    std::future<sockaddr_in> lookup;   // valid only while state == Resolving
     uint64_t connection_id = 0;
     uint32_t transaction_id = 0;
     uint32_t key = 0;
@@ -96,7 +99,7 @@ private:
 
     static void fail_backoff(TrackerSession& t);
 
-    void send_connect(TrackerSession& tracker);
+    void send_connect(TrackerSession& t);
     [[nodiscard]] static bool recv_connect(TrackerSession& t);
 
     [[nodiscard]] TrackerEvent pending_event(const TrackerSession& t) const;

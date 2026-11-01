@@ -7,6 +7,7 @@
 #include <cstring>
 #include <utility>
 #include <vector>
+#include <thread>
 #include <algorithm>
 #include <unistd.h>
 #include <arpa/inet.h>
@@ -296,13 +297,23 @@ void TrackerManager::fail_send(TrackerSession& t, const char* what) {
 
 void TrackerManager::send_connect(TrackerSession& t) {
     if (!t.sock) {
-        try {
-            open_socket(t, resolve(t.address.host, t.address.port));
-        } catch (const std::exception& e) {
-            log(LogLevel::Debug, "connect failed for {}: {}", t.address.host, e.what());
-            fail_backoff(t);
-            return;
-        }
+        log(LogLevel::Trace, "resolving {}:{}", t.address.host, t.address.port);
+
+        std::promise<sockaddr_in> promise;
+        t.lookup = promise.get_future();
+
+        std::thread worker([host = t.address.host, port = t.address.port,
+                            p = std::move(promise)]() mutable {
+            try {
+                p.set_value(resolve(host, port));
+            } catch (...) {
+                p.set_exception(std::current_exception());
+            }
+        });
+        worker.detach();
+
+        t.state = TrackerState::Resolving;
+        return;
     }
 
     t.transaction_id = next_random();
@@ -483,6 +494,19 @@ void TrackerManager::advance(TrackerSession& t, const AnnounceParams& stats,
             if (now >= t.next_action) send_connect(t);
             return;
 
+        case Resolving:
+            if (t.lookup.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+                return;   // still resolving, check again next tick
+            try {
+                open_socket(t, t.lookup.get());
+            } catch (const std::exception& e) {
+                log(LogLevel::Debug, "connect failed for {}: {}", t.address.host, e.what());
+                fail_backoff(t);
+                return;
+            }
+            send_connect(t);
+            return;
+
         case Connecting:
         case Announcing:
             if (now >= t.next_action) on_timeout(t, now);
@@ -531,6 +555,7 @@ void TrackerManager::begin_shutdown() {
                 t.state = Connected;
                 t.next_action = now;
                 break;
+            case Resolving:                 // lookup finishes → connect → 'stopped'
             case Connecting:                // reply leads to Connected, then 'stopped'
             case Connected:
             case Stopped:
