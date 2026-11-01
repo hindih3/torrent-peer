@@ -116,8 +116,11 @@ tools, such as `LLVMFuzzerTestOneInput`, are excluded in `.clang-tidy`.
   downloading Sintel (about 129 MB) used 2.1s of CPU over a 35s
   download, about 6% of one core, with 18 MB peak memory. One thread means no
   locking, synchronization and other overheads that come with multithreading.
-  The cost is that a blocking call like a DNS lookup or slow disk write
-  holds the entire client until finished.
+  The one exception is tracker DNS lookups: `getaddrinfo()` has no non-blocking
+  form, so each lookup runs on a short-lived worker thread and hands its result
+  back through a `std::promise`. The worker shares nothing with the loop, so
+  there's still no locking. A slow disk write, however, still holds the entire
+  client until finished.
 
 
 * **Download algorithm.** Piece rarity is calculated by summing the bitfields of
@@ -199,7 +202,6 @@ tools, such as `LLVMFuzzerTestOneInput`, are excluded in `.clang-tidy`.
 - A snubbed peer can hold one block for the 15 s request timeout (no endgame mode)
 - Requests that arrive while a peer's write queue is full (4 MiB) are dropped
   rather than deferred, so that peer has to wait for its own timeout to ask again
-- DNS resolution blocks the event loop
 - One fd per file for huge torrents can potentially trigger the per-process soft limit
 
 ## References
