@@ -205,6 +205,11 @@ void Session::on_request(const PeerEvent& ev) {
             ev.peer_id, ev.req.piece_index);
         return;
     }
+    if (!peers_.can_queue(ev.peer_id)) {
+        log(LogLevel::Debug, "peer {} write queue full or peer gone; ignoring request piece {} off {}",
+            ev.peer_id, ev.req.piece_index, ev.req.offset);
+        return;
+    }
     try {
         auto data = disk_.read_block(ev.req.piece_index, ev.req.offset, ev.req.length);
         peers_.send_piece(ev.peer_id, ev.req.piece_index, ev.req.offset, data);

@@ -43,6 +43,7 @@ struct PeerConnection {
     std::vector<uint8_t> read_buffer;
     std::deque<std::vector<uint8_t>> write_buffer;  // one whole message per element
     size_t cursor = 0;  // bytes of write_buffer.front() already handed to the kernel
+    size_t queued_bytes = 0;
 };
 
 enum MessageId : uint8_t {
@@ -102,6 +103,7 @@ public:
     // and outbound. Returns the Dropped events for the caller to dispatch
     std::vector<PeerEvent> ban(const std::string& host);
     bool is_banned(const std::string& host) const { return banned_.contains(host); }
+    bool can_queue(uint32_t peer_id) const;
 
     static void queue(PeerConnection& c, std::vector<uint8_t> msg);
 
