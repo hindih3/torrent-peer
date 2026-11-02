@@ -90,7 +90,6 @@ public:
 
     void send_interested_all();
     void send_interested(uint32_t peer_id);
-    void send_to(uint32_t peer_id, std::vector<uint8_t> msg);
     void send_unchoke(uint32_t peer_id);
     void send_choke(uint32_t peer_id);
     void send_request(uint32_t peer_id, const BlockRequest& req);
@@ -104,8 +103,6 @@ public:
     std::vector<PeerEvent> ban(const std::string& host);
     bool is_banned(const std::string& host) const { return banned_.contains(host); }
     bool can_queue(uint32_t peer_id) const;
-
-    static void enqueue(PeerConnection& c, std::vector<uint8_t> msg);
 
     std::unordered_map<uint32_t, PeerConnection>& connections() { return conns_; }
 
@@ -143,7 +140,7 @@ private:
     size_t outbound_at_ = 0;
     size_t conns_at_   = 0;
 
-    void          accept_new();
+    void            accept_new();
     HandshakeResult advance_inbound(PendingInbound& p, std::vector<PeerEvent>& out);
     void            expire_inbound(std::chrono::seconds timeout);
 
@@ -157,6 +154,9 @@ private:
                                         const Peer& peer) const;
     uint32_t           promote(UniqueFd sock, const Peer& peer, std::vector<PeerEvent>& out);
     static std::string key(const Peer& p) { return p.host + ":" + p.port; }
+
+    void        send_to(uint32_t peer_id, std::vector<uint8_t> msg);
+    static void enqueue(PeerConnection& c, std::vector<uint8_t> msg);
 
     void handle_message(uint32_t peer_id, const std::vector<uint8_t>& msg,
                         std::vector<PeerEvent>& out);
