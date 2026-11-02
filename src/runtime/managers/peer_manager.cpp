@@ -114,6 +114,28 @@ namespace {
         std::memcpy(payload.data() + 8, &length, 4);
         return build_message(MsgRequest, payload);
     }
+
+    // drop a queued piece message the peer no longer wants. The front message
+    // stays once cursor > 0: the peer already has its first bytes, so removing
+    // the rest would desync the stream
+    bool remove_queued_piece(PeerConnection& c, uint32_t index,
+                             uint32_t begin, uint32_t length) {
+        // a piece message: [len:4][id:1][index:4][begin:4][block:length]
+        const size_t first = c.cursor > 0 ? 1 : 0;
+        for (auto it = c.write_buffer.begin() + first; it != c.write_buffer.end(); ++it) {
+            const std::vector<uint8_t>& m = *it;
+            if (m.size() != 13 + static_cast<size_t>(length) || m[4] != MsgPiece) continue;
+            uint32_t i, b;
+            std::memcpy(&i, m.data() + 5, 4);
+            std::memcpy(&b, m.data() + 9, 4);
+            if (ntohl(i) != index || ntohl(b) != begin) continue;
+
+            c.queued_bytes -= m.size();
+            c.write_buffer.erase(it);
+            return true;
+        }
+        return false;
+    }
 }
 
 PeerManager::PeerManager(const TorrentFile& torrent, std::string peer_id,
@@ -510,10 +532,24 @@ void PeerManager::handle_message(uint32_t peer_id, const std::vector<uint8_t>& m
             break;
         }
 
+        case MsgCancel: {
+            if (payload_len != 12) throw std::runtime_error("bad cancel");
+            uint32_t index, begin, length;
+            std::memcpy(&index,  payload,     4);
+            std::memcpy(&begin,  payload + 4, 4);
+            std::memcpy(&length, payload + 8, 4);
+            index = ntohl(index); begin = ntohl(begin); length = ntohl(length);
+
+            const bool removed = remove_queued_piece(c, index, begin, length);
+            log(LogLevel::Trace, "peer {} <- cancel piece {} off {} len {}{}",
+                peer_id, index, begin, length, removed ? "" : " (already sent)");
+            break;
+        }
+
         default:
             log(LogLevel::Trace, "peer {} <- unknown msg id {} ({} byte payload)",
                 peer_id, id, payload_len);
-            break;   // cancel/unknown
+            break;   // unknown
     }
 }
 
