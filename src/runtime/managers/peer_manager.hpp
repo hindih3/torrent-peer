@@ -46,11 +46,6 @@ struct PeerConnection {
     size_t queued_bytes = 0;
 };
 
-enum MessageId : uint8_t {
-    MsgChoke = 0, MsgUnchoke = 1, MsgInterested = 2, MsgNotInterested = 3,
-    MsgHave = 4, MsgBitfield = 5, MsgRequest = 6, MsgPiece = 7, MsgCancel = 8
-};
-
 // An accepted socket that has not finished its handshake yet. Kept out of
 // conns_ so the peer-wire framer never sees the 68 handshake bytes.
 struct PendingInbound {
@@ -71,9 +66,6 @@ struct PendingOutbound {
     size_t                                received = 0;
     std::chrono::steady_clock::time_point deadline{};
 };
-
-std::vector<uint8_t> build_message(uint8_t id, const std::vector<uint8_t>& payload = {});
-std::vector<uint8_t> build_request(const BlockRequest& req);
 
 class PeerManager {
 public:

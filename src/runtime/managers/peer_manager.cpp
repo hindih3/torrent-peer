@@ -20,6 +20,11 @@ namespace {
     constexpr auto   kHandshakeTimeout = std::chrono::seconds(15);
     constexpr size_t kMaxQueuedBytes = (1 << 22); // 4 MiB
 
+    enum MessageId : uint8_t {
+        MsgChoke = 0, MsgUnchoke = 1, MsgInterested = 2, MsgNotInterested = 3,
+        MsgHave = 4, MsgBitfield = 5, MsgRequest = 6, MsgPiece = 7, MsgCancel = 8
+    };
+
     UniqueFd build_listen_fd(uint16_t port) {
         UniqueFd sock(::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0));
         if (!sock) {
@@ -88,27 +93,27 @@ namespace {
         for (const auto& p : pending) out.push_back(p.req);
         return out;
     }
-}
 
-std::vector<uint8_t> build_message(const uint8_t id, const std::vector<uint8_t>& payload) {
-    uint32_t len = htonl(static_cast<uint32_t>(1 + payload.size()));
-    std::vector<uint8_t> msg(5 + payload.size());
-    std::memcpy(msg.data(), &len, 4);
-    msg[4] = id;
-    if (!payload.empty())
-        std::memcpy(msg.data() + 5, payload.data(), payload.size());
-    return msg;
-}
+    std::vector<uint8_t> build_message(const uint8_t id, const std::vector<uint8_t>& payload = {}) {
+        uint32_t len = htonl(static_cast<uint32_t>(1 + payload.size()));
+        std::vector<uint8_t> msg(5 + payload.size());
+        std::memcpy(msg.data(), &len, 4);
+        msg[4] = id;
+        if (!payload.empty())
+            std::memcpy(msg.data() + 5, payload.data(), payload.size());
+        return msg;
+    }
 
-std::vector<uint8_t> build_request(const BlockRequest& req) {
-    std::vector<uint8_t> payload(12);
-    uint32_t index  = htonl(req.piece_index);
-    uint32_t offset = htonl(req.offset);
-    uint32_t length = htonl(req.length);
-    std::memcpy(payload.data(),     &index,  4);
-    std::memcpy(payload.data() + 4, &offset, 4);
-    std::memcpy(payload.data() + 8, &length, 4);
-    return build_message(MsgRequest, payload);
+    std::vector<uint8_t> build_request(const BlockRequest& req) {
+        std::vector<uint8_t> payload(12);
+        uint32_t index  = htonl(req.piece_index);
+        uint32_t offset = htonl(req.offset);
+        uint32_t length = htonl(req.length);
+        std::memcpy(payload.data(),     &index,  4);
+        std::memcpy(payload.data() + 4, &offset, 4);
+        std::memcpy(payload.data() + 8, &length, 4);
+        return build_message(MsgRequest, payload);
+    }
 }
 
 PeerManager::PeerManager(const TorrentFile& torrent, std::string peer_id,
