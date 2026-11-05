@@ -33,7 +33,7 @@ MAX_BLOCK = 16384
 PIPELINE_DEPTH = 32       # session.cpp's kPipelineDepth
 GOOD_UNCHOKE_DELAY = 0.5  # lets the client fill a bad peer's pipeline first
 
-CHOKE, UNCHOKE, INTERESTED, BITFIELD, REQUEST, PIECE = 0, 1, 2, 5, 6, 7
+CHOKE, UNCHOKE, INTERESTED, BITFIELD, REQUEST, PIECE, CANCEL = 0, 1, 2, 5, 6, 7, 8
 PROTOCOL = b"BitTorrent protocol"
 
 failures = 0
@@ -347,6 +347,7 @@ class FakeLeecher:
 
     def __init__(self, host, info_hash, rcvbuf=None):
         self.info_hash = info_hash
+        self.buf = bytearray()
         self.sock = socket.socket()
         if rcvbuf is not None:  # must be set before connect to shrink the window
             self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, rcvbuf)
@@ -360,23 +361,31 @@ class FakeLeecher:
             self.sock.connect(("127.0.0.1", port))
             self.sock.sendall(bytes([19]) + PROTOCOL + bytes(8) + self.info_hash
                               + b"-FL0000-".ljust(20, b"-") + message(INTERESTED))
-            buf = bytearray()
-            while len(buf) < 68:
-                buf += self.recv_or_eof()
-            if buf[0] != 19 or buf[1:20] != PROTOCOL or buf[28:48] != self.info_hash:
+            while len(self.buf) < 68:
+                self.buf += self.recv_or_eof()
+            hs = self.buf[:68]
+            del self.buf[:68]
+            if hs[0] != 19 or hs[1:20] != PROTOCOL or hs[28:48] != self.info_hash:
                 return False
-            del buf[:68]
-            while True:
-                while len(buf) < 4:
-                    buf += self.recv_or_eof()
-                (length,) = struct.unpack(">I", buf[:4])
-                while len(buf) < 4 + length:
-                    buf += self.recv_or_eof()
-                if length and buf[4] == UNCHOKE:
-                    return True
-                del buf[:4 + length]
+            while self.read_message()[0] != UNCHOKE:
+                pass
+            return True
         except (OSError, EOFError):
             return False
+
+    # Returns (id, payload) of the next message, skipping keep-alives. Bytes
+    # past it stay in self.buf for the next call.
+    def read_message(self):
+        while True:
+            while len(self.buf) < 4:
+                self.buf += self.recv_or_eof()
+            (length,) = struct.unpack(">I", self.buf[:4])
+            while len(self.buf) < 4 + length:
+                self.buf += self.recv_or_eof()
+            msg = bytes(self.buf[4:4 + length])
+            del self.buf[:4 + length]
+            if msg:
+                return msg[0], msg[1:]
 
     def recv_or_eof(self):
         chunk = self.sock.recv(65536)
@@ -473,9 +482,121 @@ def run_write_flood(name, client, torrent_path, work, data, info_hash):
     check(exit_code == 0, f"{name}: client exited cleanly (code {exit_code})")
 
 
+CANCEL_BLOCKS = 256          # distinct blocks asked for and then taken back
+CANCEL_SETTLE = 0.5          # seconds for the client to queue them before the cancels
+PIECE_MSG = 13 + MAX_BLOCK   # a full block on the wire
+
+
+# Bytes the kernel holds for one TCP connection, both ends together: the
+# client's send queue plus our receive queue. That's what a cancel can no
+# longer call back. Read from /proc/net/tcp, so Linux only, like VmRSS above.
+def kernel_held_bytes(sock):
+    def ends(addr):
+        ip, port = addr
+        return socket.inet_aton(ip)[::-1].hex().upper() + f":{port:04X}"
+    ours, theirs = ends(sock.getsockname()), ends(sock.getpeername())
+    total = 0
+    with open("/proc/net/tcp") as f:
+        next(f)  # header
+        for line in f:
+            fields = line.split()
+            if {fields[1], fields[2]} == {ours, theirs}:
+                tx, rx = (int(x, 16) for x in fields[4].split(":"))
+                total += tx + rx
+    return total
+
+
+# Reads until the sentinel block arrives. The client's write queue is FIFO, so
+# any cancelled block that still went out arrives before it. Every block is
+# checked against the file: if a half-sent message had been pulled from the
+# queue, the stream would desync and this would fail. Returns (blocks before
+# the sentinel, error or None).
+def read_until_sentinel(leecher, sentinel, data):
+    before = 0
+    try:
+        while True:
+            msg_id, payload = leecher.read_message()
+            if msg_id != PIECE:
+                continue
+            index, begin = struct.unpack(">II", payload[:8])
+            off = index * PIECE_LENGTH + begin
+            if payload[8:] != data[off:off + len(payload) - 8]:
+                return before, f"block {index}/{begin} doesn't match the file (stream desynced?)"
+            if (index, begin, len(payload) - 8) == sentinel:
+                return before, None
+            before += 1
+    except socket.timeout:
+        return before, "sentinel block never arrived"
+    except (OSError, EOFError):
+        return before, "client hung up"
+
+
+def connect_leecher(name, host, port, info_hash, **kw):
+    leecher = FakeLeecher(host, info_hash, **kw)
+    if leecher.connect(port):
+        return leecher
+    check(False, f"{name}: handshake with the client failed")
+    leecher.close()
+    return None
+
+
+# A peer takes requests back. Two ways a cancel can catch a request:
+#  - same batch: each request is followed straight away by its cancel, all in
+#    one write, so the client parses both before serving anything. None of
+#    them should ever be read from disk or sent. This check is exact.
+#  - already queued: requests first, then (once the client has queued them)
+#    cancels. Whatever the kernel has already taken can't be called back, so
+#    the test measures that just before cancelling and allows exactly those
+#    blocks, plus one partly in the kernel at each end of it.
+# A final uncancelled request marks the end of each phase.
+def run_cancel(name, client, torrent_path, work, data, info_hash):
+    proc, port, log_path = start_seeder(client, torrent_path, os.path.join(work, name), data)
+    if proc is None:
+        check(False, f"{name}: client never started seeding (log: {log_path})")
+        return
+
+    blocks = all_blocks()
+    asked, sentinel = blocks[:CANCEL_BLOCKS], blocks[CANCEL_BLOCKS]
+    request = lambda b: message(REQUEST, struct.pack(">III", *b))
+    cancel = lambda b: message(CANCEL, struct.pack(">III", *b))
+
+    # 34 bytes a pair: all of it fits in one of the client's 16 KiB reads
+    leecher = connect_leecher(name, "127.0.0.2", port, info_hash)
+    if leecher:
+        leecher.sock.sendall(b"".join(request(b) + cancel(b) for b in asked) + request(sentinel))
+        leaked, error = read_until_sentinel(leecher, sentinel, data)
+        check(error is None and leaked == 0,
+              f"{name}: same-batch cancels: {leaked} of {len(asked)} cancelled blocks sent"
+              + (f" ({error})" if error else ""))
+        leecher.close()
+
+    # tiny receive window, so most of what the client queues stays queued
+    leecher = connect_leecher(name, "127.0.0.3", port, info_hash, rcvbuf=4096)
+    if leecher:
+        leecher.sock.sendall(b"".join(request(b) for b in asked))
+        time.sleep(CANCEL_SETTLE)
+        held = kernel_held_bytes(leecher.sock)
+        limit = held // PIECE_MSG + 2
+        leecher.sock.sendall(b"".join(cancel(b) for b in asked) + request(sentinel))
+        leaked, error = read_until_sentinel(leecher, sentinel, data)
+        check(error is None and leaked <= limit,
+              f"{name}: queued cancels: {leaked} of {len(asked)} cancelled blocks sent, "
+              f"kernel already held {held / MIB:.2f} MiB (limit {limit})"
+              + (f" ({error})" if error else ""))
+        # if the kernel held everything, nothing was left to cancel
+        check(limit < len(asked) // 2,
+              f"{name}: at least half the blocks were still cancellable")
+        leecher.close()
+
+    exit_code = stop_client(proc)
+    check(exit_code == 0, f"{name}: client exited cleanly (code {exit_code})")
+
+
 SEED_SCENARIOS = [
     ("write-flood", run_write_flood,
      "a peer that floods requests and never reads shouldn't make the client queue without limit"),
+    ("cancel", run_cancel,
+     "cancelled requests shouldn't be sent, unless they're already on their way"),
 ]
 
 
