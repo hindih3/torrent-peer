@@ -540,9 +540,24 @@ void PeerManager::handle_message(uint32_t peer_id, const std::vector<uint8_t>& m
             std::memcpy(&length, payload + 8, 4);
             index = ntohl(index); begin = ntohl(begin); length = ntohl(length);
 
+            // a request from this batch hasn't reached Session yet: drop it before
+            // it costs a disk read. `out` holds every peer's events for this round,
+            // so match on peer_id too
+            const auto pending = std::find_if(out.rbegin(), out.rend(), [&](const PeerEvent& ev) {
+                return ev.type == PeerEvent::Request && ev.peer_id == peer_id
+                    && ev.req.piece_index == index && ev.req.offset == begin
+                    && ev.req.length == length;
+            });
+            if (pending != out.rend()) {
+                out.erase(std::next(pending).base());
+                log(LogLevel::Trace, "peer {} <- cancel piece {} off {} len {} (before read)",
+                    peer_id, index, begin, length);
+                break;
+            }
+
             const bool removed = remove_queued_piece(c, index, begin, length);
             log(LogLevel::Trace, "peer {} <- cancel piece {} off {} len {}{}",
-                peer_id, index, begin, length, removed ? "" : " (already sent)");
+                peer_id, index, begin, length, removed ? "" : " (no queued match)");
             break;
         }
 
