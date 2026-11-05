@@ -540,6 +540,8 @@ void PeerManager::handle_message(uint32_t peer_id, const std::vector<uint8_t>& m
             std::memcpy(&length, payload + 8, 4);
             index = ntohl(index); begin = ntohl(begin); length = ntohl(length);
 
+            if (length > kBlockSize) throw std::runtime_error("cancel too large");
+
             // a request from this batch hasn't reached Session yet: drop it before
             // it costs a disk read. `out` holds every peer's events for this round,
             // so match on peer_id too
