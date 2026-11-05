@@ -95,7 +95,7 @@ tools, such as `LLVMFuzzerTestOneInput`, are excluded in `.clang-tidy`.
 ## Highlights
 
 * **One Session, many managers.** The bulk of the program is accessed through
-  session, an orchestrator class that controls four narrowly scoped managers:
+  session, an orchestrator class that controls five narrowly scoped managers:
   - `TrackerManager` UDP tracker communication
   - `PeerManager`    peer connections / wire protocol
   - `PieceManager`   piece selection and verification
@@ -104,7 +104,7 @@ tools, such as `LLVMFuzzerTestOneInput`, are excluded in `.clang-tidy`.
 
 
 * **Managers never call each other.** Session is the only code that touches more
-  than one, so every interaction between the managers is written in about 250 lines.
+  than one, so every interaction between the managers is written in about 280 lines.
   Take an arriving block: Session's `on_piece()` passes it to `pieces_.on_block()`, which
   returns a verified piece if that block completed one. Session hands the piece
   to `disk_.write_piece()`, then calls `peers_.broadcast_have()`.
@@ -192,7 +192,6 @@ tools, such as `LLVMFuzzerTestOneInput`, are excluded in `.clang-tidy`.
 - One torrent per process
 - Choking algorithm: every peer is unchoked on connect
 - Endgame mode, so the last few pieces can be slow
-- `cancel` messages are ignored
 - Bandwidth limits
 - POSIX only (`poll`, `pwrite`, `posix_fallocate`); works under WSL
 
