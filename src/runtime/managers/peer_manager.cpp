@@ -570,12 +570,13 @@ void PeerManager::handle_message(uint32_t peer_id, const std::vector<uint8_t>& m
     }
 }
 
-void PeerManager::send_interested_all() {
-    auto msg = build_message(MsgInterested);
-    for (auto &c: conns_ | std::views::values) {
-        c.am_interested = true;
-        enqueue(c, msg);
-    }
+void PeerManager::send_keep_alive(uint32_t peer_id) {
+    auto it = conns_.find(peer_id);
+    if (it == conns_.end()) return;
+
+    // Keep-alive is just a 4-byte zero
+    // length prefix; it has no message ID.
+    enqueue(it->second, std::vector<uint8_t>(4, 0));
 }
 
 void PeerManager::send_interested(uint32_t peer_id) {

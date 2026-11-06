@@ -80,7 +80,7 @@ public:
 
     void add_peers(std::vector<Peer> peers);
 
-    void send_interested_all();
+    void send_keep_alive(uint32_t peer_id);
     void send_interested(uint32_t peer_id);
     void send_unchoke(uint32_t peer_id);
     void send_choke(uint32_t peer_id);
@@ -152,6 +152,7 @@ private:
 
     void handle_message(uint32_t peer_id, const std::vector<uint8_t>& msg,
                         std::vector<PeerEvent>& out);
+
     void apply_availability(const Bitfield& bf, int delta);
     void drop(uint32_t id, std::vector<PeerEvent>& out);
 };
