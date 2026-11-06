@@ -40,6 +40,7 @@ struct PeerConnection {
     bool snubbed = false;
 
     std::chrono::steady_clock::time_point last_sent;
+    std::chrono::steady_clock::time_point last_received;
 
     Bitfield             has_pieces;
     std::vector<uint8_t> read_buffer;

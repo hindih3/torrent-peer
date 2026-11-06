@@ -21,6 +21,7 @@ namespace {
     constexpr auto   kConnectTimeout    = std::chrono::seconds(10);
     constexpr auto   kHandshakeTimeout  = std::chrono::seconds(15);
     constexpr auto   kKeepAliveInterval = std::chrono::seconds(60);
+    constexpr auto   kIdleTimeout       = std::chrono::seconds(150);
 
     enum MessageId : uint8_t {
         MsgChoke = 0, MsgUnchoke = 1, MsgInterested = 2, MsgNotInterested = 3,
@@ -382,6 +383,7 @@ std::vector<PeerEvent> PeerManager::handle_events(const std::span<pollfd> pfds) 
         }
 
         c.read_buffer.insert(c.read_buffer.end(), chunk, chunk + n);
+        c.last_received = std::chrono::steady_clock::now();
 
         try {
             std::vector<uint8_t> msg;
@@ -393,13 +395,20 @@ std::vector<PeerEvent> PeerManager::handle_events(const std::span<pollfd> pfds) 
         }
     }
 
-    // 3. Remove dropped peers.
+    // 3. Drop idle peers along with everyone who failed above. A peer can be
+    //    listed twice; drop() ignores ids that are already gone.
+    const auto now = std::chrono::steady_clock::now();
+    for (const auto& [id, c] : conns_) {
+        if (now - c.last_received >= kIdleTimeout) {
+            log(LogLevel::Debug, "peer {} dropped: idle", id);
+            to_drop.push_back(id);
+        }
+    }
     for (uint32_t id : to_drop)
         drop(id, events);
 
     // 4. Keep-alives. Anything already queued reaches the peer anyway, so only
     //    idle connections need one.
-    const auto now = std::chrono::steady_clock::now();
     for (auto& c : conns_ | std::views::values) {
         if (c.write_buffer.empty() && now - c.last_sent >= kKeepAliveInterval)
             send_keep_alive(c.id);
@@ -855,7 +864,11 @@ uint32_t PeerManager::promote(UniqueFd sock, const Peer& peer, std::vector<PeerE
     c.sock       = std::move(sock);
     c.peer       = peer;
     c.has_pieces = Bitfield(piece_count_);
-    c.last_sent  = std::chrono::steady_clock::now();
+
+    auto now = std::chrono::steady_clock::now();
+    c.last_sent     = now;
+    c.last_received = now;
+
     const uint32_t id = c.id;
     conns_.emplace(id, std::move(c));
     out.push_back({.type = PeerEvent::Joined, .peer_id = id, .block = {}, .req = {}});
