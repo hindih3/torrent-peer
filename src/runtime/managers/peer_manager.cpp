@@ -14,11 +14,13 @@
 #include "core/log.hpp"
 
 namespace {
-    constexpr size_t kMaxHalfOpen      = 20;    // concurrent dials, leaves room for inbound
-    constexpr size_t kMaxCandidates    = 1000;  // bound on queued addresses
-    constexpr auto   kConnectTimeout   = std::chrono::seconds(10);
-    constexpr auto   kHandshakeTimeout = std::chrono::seconds(15);
-    constexpr size_t kMaxQueuedBytes = (1 << 22); // 4 MiB
+    constexpr size_t kMaxHalfOpen    = 20;   // concurrent dials, leaves room for inbound
+    constexpr size_t kMaxCandidates  = 1000;    // bound on queued addresses
+    constexpr size_t kMaxQueuedBytes = (1 << 22);  // 4 MiB
+
+    constexpr auto   kConnectTimeout    = std::chrono::seconds(10);
+    constexpr auto   kHandshakeTimeout  = std::chrono::seconds(15);
+    constexpr auto   kKeepAliveInterval = std::chrono::seconds(60);
 
     enum MessageId : uint8_t {
         MsgChoke = 0, MsgUnchoke = 1, MsgInterested = 2, MsgNotInterested = 3,
@@ -352,6 +354,7 @@ std::vector<PeerEvent> PeerManager::handle_events(const std::span<pollfd> pfds) 
             } else {
                 // a partial send only moves the cursor; the message is
                 // freed once, when its last byte has gone to the kernel
+                c.last_sent = std::chrono::steady_clock::now();
                 c.cursor += static_cast<size_t>(w);
                 if (c.cursor == front.size()) {
                     c.queued_bytes -= front.size();
@@ -394,17 +397,25 @@ std::vector<PeerEvent> PeerManager::handle_events(const std::span<pollfd> pfds) 
     for (uint32_t id : to_drop)
         drop(id, events);
 
-    // 4. Expire handshakes and connects that took too long.
+    // 4. Keep-alives. Anything already queued reaches the peer anyway, so only
+    //    idle connections need one.
+    const auto now = std::chrono::steady_clock::now();
+    for (auto& c : conns_ | std::views::values) {
+        if (c.write_buffer.empty() && now - c.last_sent >= kKeepAliveInterval)
+            send_keep_alive(c.id);
+    }
+
+    // 5. Expire handshakes and connects that took too long.
     expire_inbound(kHandshakeTimeout);
     expire_outbound();
 
-    // 5. Accept new inbound connections. This adds to inbound_, so it must
+    // 6. Accept new inbound connections. This adds to inbound_, so it must
     //    come after every indexed loop above. The listen socket, when
     //    present, is always pfds[0].
     if (listen_sock_ && (pfds[0].revents & POLLIN))
         accept_new();
 
-    // 5. Refill any slots freed this loop. New sockets join the next build_fds().
+    // 7. Refill any slots freed this loop. New sockets join the next build_fds().
     dial_more();
 
     return events;
@@ -841,10 +852,10 @@ bool PeerManager::verify_handshake(const std::array<uint8_t, 68>& hs, const Peer
 uint32_t PeerManager::promote(UniqueFd sock, const Peer& peer, std::vector<PeerEvent>& out) {
     PeerConnection c;
     c.id         = next_id_++;
-    c.sock     = std::move(sock);
+    c.sock       = std::move(sock);
     c.peer       = peer;
     c.has_pieces = Bitfield(piece_count_);
-
+    c.last_sent  = std::chrono::steady_clock::now();
     const uint32_t id = c.id;
     conns_.emplace(id, std::move(c));
     out.push_back({.type = PeerEvent::Joined, .peer_id = id, .block = {}, .req = {}});

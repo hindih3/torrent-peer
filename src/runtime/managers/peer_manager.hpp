@@ -39,6 +39,8 @@ struct PeerConnection {
     std::vector<PendingRequest> pending;
     bool snubbed = false;
 
+    std::chrono::steady_clock::time_point last_sent;
+
     Bitfield             has_pieces;
     std::vector<uint8_t> read_buffer;
     std::deque<std::vector<uint8_t>> write_buffer;  // one whole message per element
