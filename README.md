@@ -197,7 +197,7 @@ tools, such as `LLVMFuzzerTestOneInput`, are excluded in `.clang-tidy`.
 
 **Known issues**
 
-- No keep-alives are sent and idle peers are never timed out
+- Idle peers are never timed out
 - A snubbed peer can hold one block for the 15 s request timeout (no endgame mode)
 - Requests that arrive while a peer's write queue is full (4 MiB) are dropped
   rather than deferred, so that peer has to wait for its own timeout to ask again
