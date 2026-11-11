@@ -25,24 +25,28 @@ struct PeerEvent {
 };
 
 struct PeerConnection {
-    uint32_t id;
-
+    uint32_t id = 0;
     UniqueFd sock;
+
     Peer peer;
+    Bitfield has_pieces;
+    std::vector<PendingRequest> pending;
+
     bool am_choking      = true;
     bool am_interested   = false;
     bool peer_choking    = true;
     bool peer_interested = false;
+    bool got_bitfield    = false;
+    bool snubbed         = false;
 
-    bool got_bitfield = false;
-
-    std::vector<PendingRequest> pending;
-    bool snubbed = false;
+    uint64_t bytes_down  = 0;
+    uint64_t bytes_up    = 0;
+    uint64_t round_down  = 0;
+    uint64_t round_up    = 0;
 
     std::chrono::steady_clock::time_point last_sent;
     std::chrono::steady_clock::time_point last_received;
 
-    Bitfield             has_pieces;
     std::vector<uint8_t> read_buffer;
     std::deque<std::vector<uint8_t>> write_buffer;  // one whole message per element
     size_t cursor = 0;  // bytes of write_buffer.front() already handed to the kernel
