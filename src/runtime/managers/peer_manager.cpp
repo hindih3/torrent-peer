@@ -199,7 +199,7 @@ void PeerManager::accept_new() {
 // peer pipelined behind the handshake (usually its bitfield) stays in the kernel
 // buffer and is picked up by the normal read path on the next poll.
 PeerManager::HandshakeResult PeerManager::advance_inbound(PendingInbound& p, std::vector<PeerEvent>& out) {
-    ssize_t n = recv(p.sock.get(), p.buffer.data() + p.received, 68 - p.received, 0);
+    ssize_t n = ::recv(p.sock.get(), p.buffer.data() + p.received, 68 - p.received, 0);
 
     if (n < 0) {
         if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
@@ -368,7 +368,7 @@ std::vector<PeerEvent> PeerManager::handle_events(const std::span<pollfd> pfds) 
         if (!(rev & (POLLIN | POLLERR | POLLHUP))) continue;
 
         uint8_t chunk[16384];
-        ssize_t n = recv(c.sock.get(), chunk, sizeof(chunk), 0);
+        ssize_t n = ::recv(c.sock.get(), chunk, sizeof(chunk), 0);
 
         if (n < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) continue;
@@ -804,7 +804,7 @@ PeerManager::HandshakeResult PeerManager::advance_outbound(PendingOutbound& p, s
     // behind its handshake (usually the bitfield) stays for the normal path.
     if (!(rev & (POLLIN | POLLERR | POLLHUP))) return HandshakeResult::Keep;
 
-    const ssize_t n = recv(p.sock.get(), p.buffer.data() + p.received, 68 - p.received, 0);
+    const ssize_t n = ::recv(p.sock.get(), p.buffer.data() + p.received, 68 - p.received, 0);
     if (n < 0) {
         if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
             return HandshakeResult::Keep;
