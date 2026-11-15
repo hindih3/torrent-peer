@@ -474,6 +474,7 @@ void PeerManager::handle_message(uint32_t peer_id, const std::vector<uint8_t>& m
         case MsgInterested:
             log(LogLevel::Trace, "peer {} <- interested", peer_id);
             c.peer_interested = true;
+            if (c.am_choking && open_slot()) send_unchoke(peer_id);
             break;
 
         case MsgNotInterested:
@@ -728,8 +729,17 @@ void PeerManager::apply_availability(const Bitfield& bf, int delta) {
         if (bf.get(i)) piece_frequency_[i] += delta;
 }
 
+// a regular slot is free: fewer than kRegularSlots peers are unchoked,
+// not counting the optimistic one, which has a slot of its own
+bool PeerManager::open_slot() const {
+    size_t unchoked = 0;
+    for (const auto& c : conns_ | std::views::values)
+        if (!c.am_choking && c.id != optimistic_) ++unchoked;
+    return unchoked < kRegularSlots;
+}
+
 // Subtract the peer's pieces from the availability counts used by rarest-first,
-// forget its address so it can be dialled again, and report a Dropped event.
+// forget its address so it can be dialed again, and report a Dropped event.
 void PeerManager::drop(uint32_t id, std::vector<PeerEvent>& out) {
     auto it = conns_.find(id);
     if (it == conns_.end()) return;
