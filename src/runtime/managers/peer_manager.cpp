@@ -118,26 +118,27 @@ namespace {
         return build_message(MsgRequest, payload);
     }
 
-    // drop a queued piece message the peer no longer wants. The front message
-    // stays once cursor > 0: the peer already has its first bytes, so removing
-    // the rest would desync the stream
-    bool remove_queued_piece(PeerConnection& c, uint32_t index,
-                             uint32_t begin, uint32_t length) {
-        // a piece message: [len:4][id:1][index:4][begin:4][block:length]
-        const size_t first = c.cursor > 0 ? 1 : 0;
-        for (auto it = c.write_buffer.begin() + first; it != c.write_buffer.end(); ++it) {
+    // drop queued piece messages for which 'match(index, begin, length)' is true.
+    // The front message stays once cursor > 0: the peer already has its first
+    // bytes, so removing the rest would desync the stream
+    template <typename Match>
+    size_t remove_queued_pieces(PeerConnection& c, Match match) {
+        size_t removed = 0;
+        auto it = c.write_buffer.begin() + (c.cursor > 0 ? 1 : 0);
+        while (it != c.write_buffer.end()) {
+            // a piece message: [len:4][id:1][index:4][begin:4][block]
             const std::vector<uint8_t>& m = *it;
-            if (m.size() != 13 + static_cast<size_t>(length) || m[4] != MsgPiece) continue;
+            if (m.size() < 13 || m[4] != MsgPiece) { ++it; continue; }
             uint32_t i, b;
             std::memcpy(&i, m.data() + 5, 4);
             std::memcpy(&b, m.data() + 9, 4);
-            if (ntohl(i) != index || ntohl(b) != begin) continue;
+            if (!match(ntohl(i), ntohl(b), static_cast<uint32_t>(m.size() - 13))) { ++it; continue; }
 
             c.queued_bytes -= m.size();
-            c.write_buffer.erase(it);
-            return true;
+            it = c.write_buffer.erase(it);
+            ++removed;
         }
-        return false;
+        return removed;
     }
 }
 
@@ -583,7 +584,9 @@ void PeerManager::handle_message(uint32_t peer_id, const std::vector<uint8_t>& m
                 break;
             }
 
-            const bool removed = remove_queued_piece(c, index, begin, length);
+            const bool removed = remove_queued_pieces(c, [&](uint32_t i, uint32_t b, uint32_t l) {
+                return i == index && b == begin && l == length;
+            }) > 0;
             log(LogLevel::Trace, "peer {} <- cancel piece {} off {} len {}{}",
                 peer_id, index, begin, length, removed ? "" : " (no queued match)");
             break;
@@ -617,6 +620,7 @@ void PeerManager::send_choke(uint32_t peer_id) {
     if (it == conns_.end()) return;
     it->second.am_choking = true;
     enqueue(it->second, build_message(MsgChoke));
+    remove_queued_pieces(it->second, [](uint32_t, uint32_t, uint32_t) { return true; });
 }
 
 void PeerManager::send_to(uint32_t peer_id, std::vector<uint8_t> msg) {
