@@ -623,10 +623,10 @@ void PeerManager::rechoke(const bool seeding) {
     for (auto& c : conns_ | std::views::values) {
         const bool unchoke = c.id == optimistic_
                   || std::ranges::find(top, &c) != top.end();
-        if (unchoke && c.am_choking)        send_unchoke(c.id);
-        else if (!unchoke && !c.am_choking) {
+        if (unchoke && c.am_choking)
+            send_unchoke(c.id);
+        else if (!unchoke && !c.am_choking)
             send_choke(c.id);
-        }
 
         c.round_down = 0;
         c.round_up   = 0;
