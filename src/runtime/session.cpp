@@ -12,6 +12,9 @@ namespace {
     constexpr size_t kPipelineDepth = 32; // requests in flight per peer
     constexpr auto kRequestTimeout = std::chrono::seconds(15); // before a block goes back in the pool
 
+    constexpr auto   kRechokeInterval    = std::chrono::seconds(10);
+    constexpr auto   kOptimisticInterval = std::chrono::seconds(30);
+
     int64_t ms_since(std::chrono::steady_clock::time_point t) {
         return std::chrono::duration_cast<std::chrono::milliseconds>(
                    std::chrono::steady_clock::now() - t).count();
@@ -45,14 +48,15 @@ void Session::greet(uint32_t id) {
         id, pieces_.completed(), pieces_.total());
 
     peers_.send_bitfield(id, bf);
-    peers_.send_unchoke(id);
     if (!pieces_.is_complete())
         peers_.send_interested(id);
 }
 
 void Session::run(const std::atomic<bool>& shutdown) {
     const auto started = std::chrono::steady_clock::now();
-    auto last_report   = started;
+    auto last_report     = started;
+    auto last_rechoke    = started;
+    auto last_optimistic = started;
 
     uint64_t last_down = downloaded_;   // totals at the last status line
     uint64_t last_up   = uploaded_;
@@ -102,6 +106,19 @@ void Session::run(const std::atomic<bool>& shutdown) {
             trackers_.on_download_complete();
             log(LogLevel::Info, "download complete in {:.1f} s | seeding",
                 static_cast<double>(ms_since(started)) / 1000.0);
+        }
+
+        // Optimistic first: when both fire together, rechoke()
+        // then chokes the previous pick right away instead of
+        // leaving it unchoked for another round
+        const auto now = std::chrono::steady_clock::now();
+        if (now - last_optimistic >= kOptimisticInterval) {
+            peers_.optimistic_unchoke();
+            last_optimistic = now;
+        }
+        if (now - last_rechoke >= kRechokeInterval) {
+            peers_.rechoke(completed_);
+            last_rechoke = now;
         }
 
         // Keep every unchoked peer's pipe full instead of one block per round
