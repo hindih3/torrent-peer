@@ -17,6 +17,7 @@ namespace {
     constexpr size_t kMaxHalfOpen    = 20;   // concurrent dials, leaves room for inbound
     constexpr size_t kMaxCandidates  = 1000;    // bound on queued addresses
     constexpr size_t kMaxQueuedBytes = (1 << 22);  // 4 MiB
+    constexpr size_t kRegularSlots   = 7;
 
     constexpr auto   kConnectTimeout    = std::chrono::seconds(10);
     constexpr auto   kHandshakeTimeout  = std::chrono::seconds(15);
@@ -597,6 +598,50 @@ void PeerManager::handle_message(uint32_t peer_id, const std::vector<uint8_t>& m
                 peer_id, id, payload_len);
             break;   // unknown
     }
+}
+
+// Unchoke the kRegularSlots interested peers with the best rate this round,
+// choke everyone else, then start a new round. While leeching, the rate is how
+// fast a peer sends. While seeding, it's how fast they receive from us
+void PeerManager::rechoke(const bool seeding) {
+    const auto rate = [seeding](const PeerConnection* c) {
+        return seeding ? c->round_up : c->round_down;
+    };
+
+    std::vector<PeerConnection*> interested;
+    interested.reserve(conns_.size());
+    for (auto& c : conns_ | std::views::values)
+        if (c.peer_interested) interested.push_back(&c);
+
+    // only the winners need to be in order; clamp so 'middle' never passes end()
+    const size_t winners = std::min(kRegularSlots, interested.size());
+    std::ranges::partial_sort(interested, interested.begin() + winners,
+                              std::ranges::greater{}, rate);
+    const auto top = std::span(interested).first(winners);
+
+    for (auto& c : conns_ | std::views::values) {
+        const bool unchoke = c.id == optimistic_
+                  || std::ranges::find(top, &c) != top.end();
+        if (unchoke && c.am_choking)        send_unchoke(c.id);
+        else if (!unchoke && !c.am_choking) {
+            send_choke(c.id);
+        }
+
+        c.round_down = 0;
+        c.round_up   = 0;
+    }
+}
+
+// give one random choked, interested peer a slot until the next pick
+void PeerManager::optimistic_unchoke() {
+    std::vector<uint32_t> candidates;
+    for (const auto& c : conns_ | std::views::values)
+        if (c.peer_interested && c.am_choking) candidates.push_back(c.id);
+    if (candidates.empty()) return;   // keep the current one
+
+    std::uniform_int_distribution<size_t> dist(0, candidates.size() - 1);
+    optimistic_ = candidates[dist(rng_)];
+    send_unchoke(*optimistic_);
 }
 
 void PeerManager::send_keep_alive(uint32_t peer_id) {
