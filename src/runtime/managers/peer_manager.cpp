@@ -474,7 +474,10 @@ void PeerManager::handle_message(uint32_t peer_id, const std::vector<uint8_t>& m
         case MsgInterested:
             log(LogLevel::Trace, "peer {} <- interested", peer_id);
             c.peer_interested = true;
-            if (c.am_choking && open_slot()) send_unchoke(peer_id);
+            if (c.am_choking && open_slot()) {
+                log(LogLevel::Debug, "peer {} interested and a slot is free; unchoking", peer_id);
+                send_unchoke(peer_id);
+            }
             break;
 
         case MsgNotInterested:
@@ -620,6 +623,10 @@ void PeerManager::rechoke(const bool seeding) {
                               std::ranges::greater{}, rate);
     const auto top = std::span(interested).first(winners);
 
+    for (size_t i = 0; i < top.size(); ++i)
+        log(LogLevel::Trace, "rechoke: rank {} peer {} ({} bytes this round)",
+            i + 1, top[i]->id, rate(top[i]));
+
     for (auto& c : conns_ | std::views::values) {
         const bool unchoke = c.id == optimistic_
                   || std::ranges::find(top, &c) != top.end();
@@ -631,6 +638,9 @@ void PeerManager::rechoke(const bool seeding) {
         c.round_down = 0;
         c.round_up   = 0;
     }
+    log(LogLevel::Debug, "rechoke ({}): {} interested, top {} by {}",
+    seeding ? "seeding" : "leeching", interested.size(), winners,
+    seeding ? "upload" : "download");
 }
 
 // give one random choked, interested peer a slot until the next pick
@@ -643,6 +653,9 @@ void PeerManager::optimistic_unchoke() {
     std::uniform_int_distribution<size_t> dist(0, candidates.size() - 1);
     optimistic_ = candidates[dist(rng_)];
     send_unchoke(*optimistic_);
+
+    log(LogLevel::Debug, "optimistic unchoke: peer {} (from {} candidate(s))",
+    *optimistic_, candidates.size());
 }
 
 void PeerManager::send_keep_alive(uint32_t peer_id) {
@@ -666,7 +679,8 @@ void PeerManager::send_choke(uint32_t peer_id) {
     if (it == conns_.end()) return;
     it->second.am_choking = true;
     enqueue(it->second, build_message(MsgChoke));
-    remove_queued_pieces(it->second, [](uint32_t, uint32_t, uint32_t) { return true; });
+    const size_t dropped = remove_queued_pieces(it->second, [](uint32_t, uint32_t, uint32_t) { return true; });
+    log(LogLevel::Trace, "peer {} -> choke ({} queued piece(s) dropped)", peer_id, dropped);
 }
 
 void PeerManager::send_to(uint32_t peer_id, std::vector<uint8_t> msg) {
