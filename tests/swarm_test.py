@@ -342,8 +342,9 @@ def proc_status_bytes(pid, field):
 
 
 class FakeLeecher:
-    """Dials the client, handshakes and gets unchoked. What it does after
-    that, including whether it ever reads again, is up to the scenario."""
+    """Dials the client, handshakes and (by default) waits to be unchoked. What
+    it does after that, including whether it ever reads again, is up to the
+    scenario."""
 
     def __init__(self, host, info_hash, rcvbuf=None):
         self.info_hash = info_hash
@@ -355,7 +356,9 @@ class FakeLeecher:
 
     # We dialed, so we speak first. Requests sent before the client's unchoke
     # are ignored, so wait for it rather than guessing how long it takes.
-    def connect(self, port, timeout=5.0):
+    # wait_unchoke=False returns after the handshake, for a peer the client
+    # has no slot for yet.
+    def connect(self, port, timeout=5.0, wait_unchoke=True):
         self.sock.settimeout(timeout)
         try:
             self.sock.connect(("127.0.0.1", port))
@@ -367,6 +370,8 @@ class FakeLeecher:
             del self.buf[:68]
             if hs[0] != 19 or hs[1:20] != PROTOCOL or hs[28:48] != self.info_hash:
                 return False
+            if not wait_unchoke:
+                return True
             while self.read_message()[0] != UNCHOKE:
                 pass
             return True
@@ -592,11 +597,176 @@ def run_cancel(name, client, torrent_path, work, data, info_hash):
     check(exit_code == 0, f"{name}: client exited cleanly (code {exit_code})")
 
 
+# Speeds are set by how fast each leecher asks, not how fast it reads: the
+# client answers requests as they come, so its per-round upload count follows
+# the request rate exactly and socket buffers can't blur it.
+CHOKE_SLOW_RATES = [2, 4, 6, 8, 10, 12, 14]  # blocks/s, one leecher per regular slot
+CHOKE_FAST_RATE = 64                          # blocks/s, 1 MiB/s
+CHOKE_FAST_COUNT = 3
+CHOKE_MAX_UNCHOKED = len(CHOKE_SLOW_RATES) + 1  # regular slots + the optimistic one
+CHOKE_OPTIMISTIC_AT = 30     # session.cpp's kOptimisticInterval
+CHOKE_DEADLINE = 50          # the rechoke after the optimistic pick lands near 40s
+CHOKE_REQUEST_DEPTH = 8      # requests in flight per leecher
+
+
+class PacedLeecher:
+    """Wraps a connected FakeLeecher. While unchoked it requests at a fixed
+    rate, cycling through the file forever so it never stops being interested,
+    and it records every choke and unchoke the client sends it."""
+
+    def __init__(self, leecher, label, rate, start, unchoked):
+        self.leecher = leecher
+        self.label = label
+        self.rate = rate
+        self.start = start
+        self.choked = not unchoked
+        self.events = [(time.monotonic() - start, "unchoke")] if unchoked else []
+        self.blocks = all_blocks()
+        self.next_block = random.randrange(len(self.blocks))
+        self.outstanding = 0
+        self.next_at = 0.0
+        leecher.sock.setblocking(False)
+
+    def times(self, kind):
+        return [t for t, ev in self.events if ev == kind]
+
+    def on_readable(self):
+        try:
+            chunk = self.leecher.sock.recv(65536)
+        except BlockingIOError:
+            return
+        if not chunk:
+            raise EOFError(f"client hung up on {self.label}")
+        t = time.monotonic() - self.start
+        buf = self.leecher.buf
+        buf += chunk
+        while len(buf) >= 4:
+            (length,) = struct.unpack(">I", buf[:4])
+            if len(buf) < 4 + length:
+                break
+            msg_id = buf[4] if length else None  # None: keep-alive
+            del buf[:4 + length]
+            if msg_id == CHOKE:
+                self.choked = True
+                self.outstanding = 0  # a choke discards our requests
+                self.events.append((t, "choke"))
+            elif msg_id == UNCHOKE:
+                self.choked = False
+                self.events.append((t, "unchoke"))
+            elif msg_id == PIECE:
+                self.outstanding = max(0, self.outstanding - 1)
+
+    def tick(self, now):
+        if self.choked or self.outstanding >= CHOKE_REQUEST_DEPTH or now < self.next_at:
+            return
+        block = self.blocks[self.next_block % len(self.blocks)]
+        try:
+            self.leecher.sock.send(message(REQUEST, struct.pack(">III", *block)))
+        except BlockingIOError:
+            return
+        self.next_block += 1
+        self.outstanding += 1
+        self.next_at = now + 1 / self.rate
+
+
+# The client seeds to more leechers than it has slots. A seeder can only rank
+# peers it's already sending to, so a choked leecher stays at 0 bytes and the
+# only way in is the optimistic slot. The timeline (seconds since the client
+# started):
+#   0    7 slow leechers connect one at a time; each takes a free regular slot
+#   ~0   3 fast leechers connect and stay choked: no slot left
+#   ~30  the optimistic pick has to be a fast one, the only choked, interested peers
+#   ~40  rechoke: that fast leecher ranks first and keeps its slot, so the
+#        slowest slow leecher drops to 8th and is choked
+# Everything is read off the wire from the leechers' side, so it doesn't
+# depend on the client's log format.
+def run_choking(name, client, torrent_path, work, data, info_hash):
+    proc, port, log_path = start_seeder(client, torrent_path, os.path.join(work, name), data)
+    if proc is None:
+        check(False, f"{name}: client never started seeding (log: {log_path})")
+        return
+    start = time.monotonic()  # the client's rechoke timers started just before this
+
+    peers = []
+    for rate in CHOKE_SLOW_RATES:
+        leecher = connect_leecher(name, f"127.0.0.{len(peers) + 2}", port, info_hash)
+        if leecher is None:
+            break
+        peers.append(PacedLeecher(leecher, f"slow {rate}/s", rate, start, unchoked=True))
+    for _ in range(CHOKE_FAST_COUNT if len(peers) == len(CHOKE_SLOW_RATES) else 0):
+        leecher = FakeLeecher(f"127.0.0.{len(peers) + 2}", info_hash)
+        if not leecher.connect(port, wait_unchoke=False):
+            check(False, f"{name}: handshake with the client failed")
+            leecher.close()
+            break
+        peers.append(PacedLeecher(leecher, f"fast {CHOKE_FAST_RATE}/s", CHOKE_FAST_RATE,
+                                  start, unchoked=False))
+    if len(peers) != len(CHOKE_SLOW_RATES) + CHOKE_FAST_COUNT:
+        for p in peers:
+            p.leecher.close()
+        stop_client(proc)
+        return
+    slow, fast = peers[:len(CHOKE_SLOW_RATES)], peers[len(CHOKE_SLOW_RATES):]
+
+    most_unchoked, settle_until, error = 0, None, None
+    by_sock = {p.leecher.sock: p for p in peers}
+    while time.monotonic() - start < CHOKE_DEADLINE:
+        r, _, _ = select.select(list(by_sock), [], [], 0.005)
+        try:
+            for s in r:
+                by_sock[s].on_readable()
+            now = time.monotonic()
+            for p in peers:
+                p.tick(now)
+        except (EOFError, OSError) as e:
+            error = str(e)
+            break
+        most_unchoked = max(most_unchoked, sum(not p.choked for p in peers))
+
+        # done once a fast leecher is in and a slow one has been choked; keep
+        # reading a moment so every message from that rechoke has arrived
+        t = time.monotonic() - start
+        if settle_until is None and any(f.events for f in fast) \
+                and any(s.times("choke") for s in slow):
+            settle_until = t + 1.0
+        if settle_until is not None and t >= settle_until:
+            break
+
+    if error:
+        check(False, f"{name}: {error}")
+
+    picked = [f for f in fast if f.times("unchoke")]
+    picked_at = min((t for f in picked for t in f.times("unchoke")), default=None)
+    check(len(picked) == 1 and abs(picked_at - CHOKE_OPTIMISTIC_AT) <= 5,
+          f"{name}: one fast leecher got the optimistic slot near {CHOKE_OPTIMISTIC_AT}s "
+          f"({len(picked)} picked" + (f", first at {picked_at:.1f}s)" if picked else ")"))
+
+    choked = [(s, t) for s in slow for t in s.times("choke")]
+    check(len(choked) == 1 and choked[0][0].rate == min(CHOKE_SLOW_RATES)
+          and picked_at is not None and choked[0][1] > picked_at,
+          f"{name}: the next rechoke choked only the slowest leecher (choked: "
+          + (", ".join(f"{s.label} at {t:.1f}s" for s, t in choked) or "none") + ")")
+
+    check(len(picked) == 1 and not picked[0].choked,
+          f"{name}: the fast leecher kept its slot on merit")
+    check(most_unchoked <= CHOKE_MAX_UNCHOKED,
+          f"{name}: at most {CHOKE_MAX_UNCHOKED} leechers unchoked at once (saw {most_unchoked})")
+
+    for p in peers:
+        history = ", ".join(f"{ev} {t:.1f}s" for t, ev in p.events) or "always choked"
+        print(f"      {p.label:<11} {history}")
+        p.leecher.close()
+    exit_code = stop_client(proc)
+    check(exit_code == 0, f"{name}: client exited cleanly (code {exit_code})")
+
+
 SEED_SCENARIOS = [
     ("write-flood", run_write_flood,
      "a peer that floods requests and never reads shouldn't make the client queue without limit"),
     ("cancel", run_cancel,
      "cancelled requests shouldn't be sent, unless they're already on their way"),
+    ("choking", run_choking,
+     "a fast leecher let in by the optimistic slot should take the slowest leecher's slot"),
 ]
 
 
