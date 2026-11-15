@@ -11,6 +11,7 @@
 #include <span>
 #include <array>
 #include <random>
+#include <optional>
 
 #include "metainfo/torrent.hpp"
 #include "core/unique_fd.hpp"
@@ -88,6 +89,9 @@ public:
 
     void add_peers(std::vector<Peer> peers);
 
+    void rechoke(bool seeding);
+    void optimistic_unchoke();
+
     void send_keep_alive(uint32_t peer_id);
     void send_interested(uint32_t peer_id);
     void send_unchoke(uint32_t peer_id);
@@ -133,9 +137,9 @@ private:
     UniqueFd           listen_sock_;
     size_t             max_peers_;
 
-    std::vector<uint16_t> piece_frequency_;
-
-    std::vector<uint32_t> ids_;
+    std::vector<uint16_t>   piece_frequency_;
+    std::vector<uint32_t>   ids_;
+    std::optional<uint32_t> optimistic_;
     std::mt19937            rng_;
     size_t inbound_at_  = 0;
     size_t outbound_at_ = 0;
