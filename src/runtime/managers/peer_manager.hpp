@@ -167,5 +167,8 @@ private:
                         std::vector<PeerEvent>& out);
 
     void apply_availability(const Bitfield& bf, int delta);
+
+    bool open_slot() const;
+
     void drop(uint32_t id, std::vector<PeerEvent>& out);
 };
