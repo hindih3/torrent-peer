@@ -148,7 +148,8 @@ PeerManager::PeerManager(const TorrentFile& torrent, std::string peer_id,
       piece_count_(static_cast<uint32_t>(torrent.pieces.size())),
       listen_sock_(build_listen_fd(listen_port)),
       max_peers_(max_peers),
-      piece_frequency_(torrent.pieces.size(), 0) {
+      piece_frequency_(torrent.pieces.size(), 0),
+      rng_(std::random_device{}()) {
 
     if (peer_id_.size() != 20)
         throw std::runtime_error("peer_id must be exactly 20 bytes");
