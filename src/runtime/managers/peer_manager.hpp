@@ -10,6 +10,7 @@
 #include <poll.h>
 #include <span>
 #include <array>
+#include <random>
 
 #include "metainfo/torrent.hpp"
 #include "core/unique_fd.hpp"
@@ -135,6 +136,7 @@ private:
     std::vector<uint16_t> piece_frequency_;
 
     std::vector<uint32_t> ids_;
+    std::mt19937            rng_;
     size_t inbound_at_  = 0;
     size_t outbound_at_ = 0;
     size_t conns_at_   = 0;
