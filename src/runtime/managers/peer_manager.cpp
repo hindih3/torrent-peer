@@ -362,6 +362,9 @@ std::vector<PeerEvent> PeerManager::handle_events(const std::span<pollfd> pfds) 
                     c.write_buffer.pop_front();
                     c.cursor = 0;
                 }
+
+                c.bytes_up += w;
+                c.round_up += w;
             }
         }
 
@@ -383,6 +386,8 @@ std::vector<PeerEvent> PeerManager::handle_events(const std::span<pollfd> pfds) 
         }
 
         c.read_buffer.insert(c.read_buffer.end(), chunk, chunk + n);
+        c.bytes_down += n;
+        c.round_down += n;
         c.last_received = std::chrono::steady_clock::now();
 
         try {
