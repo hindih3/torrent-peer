@@ -59,6 +59,9 @@ cmake --build build-debug
 ctest --test-dir build-debug --output-on-failure
 ```
 
+The `choking` scenario runs on the client's real 10 s and 30 s choke intervals,
+so it takes about 40 s on its own. Skip it with `-E choking`.
+
 The `write-flood` scenario measures the client's memory, which ASan inflates a lot
 (shadow memory, redzones, and its fake stack for many small allocations). For real
 numbers, run it in a plain Release build. Pass `-DTP_SANITIZE=OFF` explicitly,
@@ -130,6 +133,21 @@ tools, such as `LLVMFuzzerTestOneInput`, are excluded in `.clang-tidy`.
   to 34s with 32 (~4.5× faster).
 
 
+* **Tit-for-tat choking.** Uploading to every peer at once splits the upload into
+  slivers and serves a peer that never sends anything back as well as the best
+  partner. Every 10 s the client ranks the interested peers by how much they
+  exchanged with it that round and unchokes the top 7: while downloading, by what
+  each peer sent it; while seeding, when nobody sends anything, by what each peer
+  took from it. Bytes are counted when they reach the kernel, not when they're
+  queued, so a slow reader can't look fast just because its queue is full. Every
+  30 s one random choked peer gets an optimistic unchoke. A seeder can only measure
+  peers it's already sending to, so this is how a new peer gets the chance to prove
+  itself. A newly interested peer is unchoked straight away if a slot is free, and
+  choking a peer drops the pieces still queued for it. In the `choking` test (7 slow
+  leechers holding every slot, 3 fast ones waiting), the optimistic pick lets a fast
+  leecher in at 30 s, and the rechoke at 40 s keeps it and chokes the slowest one.
+
+
 * **Tracker state machine.** Each UDP tracker (BEP 15) runs its own
   connect/announce cycle with exponential backoff, connection-ID expiry, and
   periodic re-announce, all non-blocking inside the same loop. Announces
@@ -172,7 +190,9 @@ tools, such as `LLVMFuzzerTestOneInput`, are excluded in `.clang-tidy`.
   used to erase the sent bytes from the front of one flat buffer and shift
   everything behind them. In the `write-flood` test (one leecher pipelining 4000
   requests, 62.5 MiB of blocks, and never reading), the client's memory used to
-  grow by about 64 MiB; it now grows by 4.2 MiB.
+  grow by about 64 MiB; it now grows by 4.2 MiB. Across all peers, only the
+  unchoked ones can have pieces queued: 8 at a time (briefly 9 while the
+  optimistic slot changes hands), so about 32 MiB at worst rather than 60 × 4 MiB.
 
 
 * **RAII resource ownership.** Every socket and file descriptor is wrapped in
@@ -190,7 +210,6 @@ tools, such as `LLVMFuzzerTestOneInput`, are excluded in `.clang-tidy`.
 - Protocol encryption (MSE/PE)
 - IPv6
 - One torrent per process
-- Choking algorithm: every peer is unchoked on connect
 - Endgame mode, so the last few pieces can be slow
 - Bandwidth limits
 - POSIX only (`poll`, `pwrite`, `posix_fallocate`); works under WSL
