@@ -39,8 +39,8 @@ struct PeerConnection {
     bool got_bitfield    = false;
     bool snubbed         = false;
 
-    uint64_t bytes_down  = 0;
-    uint64_t bytes_up    = 0;
+    uint64_t bytes_down  = 0;  // bytes downloaded from the peer
+    uint64_t bytes_up    = 0;  // bytes downloaded to the peer
     uint64_t round_down  = 0;
     uint64_t round_up    = 0;
 
