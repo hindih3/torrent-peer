@@ -19,6 +19,8 @@
 #include "core/types.hpp"
 #include "utils.hpp"
 
+#include "inbound.hpp"
+
 struct PeerEvent {
     enum Type { Choke, Unchoke, Piece, Dropped, Request, Joined } type;
     uint32_t     peer_id;
@@ -54,16 +56,6 @@ struct PeerConnection {
     std::deque<std::vector<uint8_t>> write_buffer;  // one whole message per element
     size_t cursor = 0;  // bytes of write_buffer.front() already handed to the kernel
     size_t queued_bytes = 0;
-};
-
-// An accepted socket that has not finished its handshake yet. Kept out of
-// conns_ so the peer-wire framer never sees the 68 handshake bytes.
-struct PendingInbound {
-    UniqueFd                              sock;
-    Peer                                  peer;
-    std::array<uint8_t, kHandshakeSize>   buffer{};
-    size_t                                received = 0;
-    std::chrono::steady_clock::time_point started{};
 };
 
 // Two phases: waiting for the TCP connect to
@@ -113,17 +105,18 @@ public:
 
     const std::vector<uint16_t>& get_piece_frequency() const { return piece_frequency_; }
 
-    // "empty" now means: nothing connected, nothing mid-handshake, and no way
+    // "empty" means: nothing connected, nothing mid-handshake, and no way
     // for anything new to arrive. A seeder with an open listen socket is not
     // idle just because no one is talking to it right now.
-    bool   empty()       const { return conns_.empty() && inbound_.empty() && outbound_.empty()
-                                        && candidates_.empty() && !listen_sock_; }
+    bool empty() const {
+        return conns_.empty() && inbound_.empty() &&
+               outbound_.empty() && candidates_.empty();
+    }
     size_t peer_count()  const { return conns_.size(); }
-    bool   listening()   const { return listen_sock_.valid(); }
+    bool   listening()   const { return inbound_.listening(); }
 
 private:
     std::unordered_map<uint32_t, PeerConnection> conns_;
-    std::vector<PendingInbound> inbound_;
     std::vector<PendingOutbound> outbound_;
     std::deque<Peer>             candidates_;   // addresses waiting for a free slot
     std::unordered_set<std::string> known_;     // "host:port" queued, dialing or connected
@@ -132,9 +125,9 @@ private:
     const TorrentFile& torrent_;
     std::string        peer_id_;
     HandshakeContext   ctx_;
+    Inbound            inbound_;
     uint32_t           piece_count_;
     uint32_t           next_id_ = 0;
-    UniqueFd           listen_sock_;
     size_t             max_peers_;
 
     std::vector<uint16_t>   piece_frequency_;
@@ -142,12 +135,9 @@ private:
     std::optional<uint32_t> optimistic_;
     std::mt19937            rng_;
     size_t inbound_at_  = 0;
+    size_t inbound_len_ = 0;
     size_t outbound_at_ = 0;
     size_t conns_at_   = 0;
-
-    void            accept_new();
-    HandshakeResult advance_inbound(PendingInbound& p, std::vector<PeerEvent>& out);
-    void            expire_inbound(std::chrono::seconds timeout);
 
     void            dial_more();
     bool            start_dial(const Peer& peer);
