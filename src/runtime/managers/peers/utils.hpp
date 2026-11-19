@@ -13,6 +13,7 @@
 
 #include "core/log.hpp"
 #include "core/types.hpp"
+#include "core/unique_fd.hpp"
 #include "metainfo/torrent.hpp"
 
 inline constexpr size_t kHandshakeSize = 68;
@@ -24,6 +25,11 @@ struct HandshakeContext {
     const TorrentFile& torrent;
     const std::string& peer_id;
     const std::unordered_set<std::string>& banned;
+};
+
+struct CompletedHandshake {
+    UniqueFd sock;
+    Peer peer;
 };
 
 inline std::vector<uint8_t> build_handshake(const HandshakeContext& ctx) {

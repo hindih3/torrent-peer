@@ -40,6 +40,8 @@ add_library(torrent_peer_lib STATIC
         src/runtime/managers/peers/peer_manager.cpp
         src/runtime/managers/piece_manager.cpp
         src/runtime/managers/tracker_manager.cpp
+        src/runtime/managers/peers/inbound.cpp
+        src/runtime/managers/peers/inbound.hpp
         src/runtime/managers/peers/utils.hpp
 )
 target_compile_definitions(torrent_peer_lib PUBLIC
