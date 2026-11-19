@@ -130,6 +130,7 @@ PeerManager::PeerManager(const TorrentFile& torrent, std::string peer_id,
             uint16_t listen_port, const size_t max_peers)
     : torrent_(torrent),
       peer_id_(std::move(peer_id)),
+      ctx_({torrent, peer_id_, banned_}),
       piece_count_(static_cast<uint32_t>(torrent.pieces.size())),
       listen_sock_(build_listen_fd(listen_port)),
       max_peers_(max_peers),
@@ -189,11 +190,11 @@ HandshakeResult PeerManager::advance_inbound(PendingInbound& p, std::vector<Peer
         r != HandshakeResult::Complete)
         return r;
 
-    if (!verify_handshake({.torrent = torrent_, .peer_id = peer_id_, .banned = banned_}, p.buffer, p.peer))
+    if (!verify_handshake(ctx_, p.buffer, p.peer))
         return HandshakeResult::Drop;
 
     const uint32_t id = promote(std::move(p.sock), p.peer, out);
-    enqueue(conns_.at(id), build_handshake({.torrent = torrent_, .peer_id = peer_id_, .banned = banned_}));
+    enqueue(conns_.at(id), build_handshake(ctx_));
     log(LogLevel::Debug, "handshake ok (inbound): {}:{}", p.peer.host, p.peer.port);
 
     return HandshakeResult::Complete;
@@ -305,7 +306,7 @@ std::vector<PeerEvent> PeerManager::handle_events(const std::span<pollfd> pfds) 
     }
 
     // 2. Established peers, walked via the ids_ snapshot from build_fds().
-    //    Peers completed in step 1 aren't in ids_, so they're skipped this
+    //    Peers promoted in step 1 aren't in ids_, so they're skipped this
     //    round and polled from the next build_fds().
     std::vector<uint32_t> to_drop;
     for (size_t k = 0; k < ids_.size(); ++k) {
@@ -843,7 +844,7 @@ HandshakeResult PeerManager::advance_outbound(PendingOutbound& p, short rev,
             return HandshakeResult::Drop;
         }
 
-        const auto hs = build_handshake({.torrent = torrent_, .peer_id = peer_id_, .banned = banned_});
+        const auto hs = build_handshake(ctx_);
         const ssize_t w = ::send(p.sock.get(), hs.data(), hs.size(), MSG_NOSIGNAL);
         if (w != static_cast<ssize_t>(hs.size())) {
             log(LogLevel::Debug, "Partial handshake write to {}:{}",
@@ -863,7 +864,7 @@ HandshakeResult PeerManager::advance_outbound(PendingOutbound& p, short rev,
         r != HandshakeResult::Complete)
         return r;
 
-    if (!verify_handshake({.torrent = torrent_, .peer_id = peer_id_, .banned = banned_}, p.buffer, p.peer))
+    if (!verify_handshake(ctx_, p.buffer, p.peer))
         return HandshakeResult::Drop;
 
     promote(std::move(p.sock), p.peer, out);

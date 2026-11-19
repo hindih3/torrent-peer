@@ -131,8 +131,9 @@ private:
 
     const TorrentFile& torrent_;
     std::string        peer_id_;
+    HandshakeContext   ctx_;
     uint32_t           piece_count_;
-    uint32_t           next_id_   = 0;
+    uint32_t           next_id_ = 0;
     UniqueFd           listen_sock_;
     size_t             max_peers_;
 
