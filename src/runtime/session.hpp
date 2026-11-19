@@ -2,7 +2,7 @@
 #include <atomic>
 #include <string_view>
 #include "managers/piece_manager.hpp"
-#include "managers/peer_manager.hpp"
+#include "managers/peers/peer_manager.hpp"
 #include "managers/disk_manager.hpp"
 #include "managers/tracker_manager.hpp"
 #include "managers/ban_manager.hpp"
