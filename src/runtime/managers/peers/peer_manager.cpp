@@ -20,7 +20,6 @@ namespace {
     constexpr size_t kRegularSlots   = 7;
 
     constexpr auto   kConnectTimeout    = std::chrono::seconds(10);
-    constexpr auto   kHandshakeTimeout  = std::chrono::seconds(15);
     constexpr auto   kKeepAliveInterval = std::chrono::seconds(60);
     constexpr auto   kIdleTimeout       = std::chrono::seconds(150);
 
@@ -56,22 +55,6 @@ namespace {
             return {};
         }
         return sock;
-    }
-
-    std::vector<uint8_t> build_handshake(const TorrentFile& torrent,
-                                     const std::string& peer_id) {
-        if (peer_id.size() != 20)
-            throw std::runtime_error("peer_id must be exactly 20 bytes");
-
-        std::vector<uint8_t> handshake(68);
-
-        handshake[0] = 19;
-        memcpy(handshake.data() + 1,  "BitTorrent protocol", 19);
-        memset(handshake.data() + 20, 0, 8);
-        memcpy(handshake.data() + 28, torrent.info_hash.data(), 20);
-        memcpy(handshake.data() + 48, peer_id.data(), 20);
-
-        return handshake;
     }
 
     bool extract_message(std::vector<uint8_t>& buf, std::vector<uint8_t>& out) {
@@ -201,26 +184,19 @@ void PeerManager::accept_new() {
 // then send ours. recv() is capped at exactly what is missing so that anything the
 // peer pipelined behind the handshake (usually its bitfield) stays in the kernel
 // buffer and is picked up by the normal read path on the next poll.
-PeerManager::HandshakeResult PeerManager::advance_inbound(PendingInbound& p, std::vector<PeerEvent>& out) {
-    ssize_t n = ::recv(p.sock.get(), p.buffer.data() + p.received, 68 - p.received, 0);
+HandshakeResult PeerManager::advance_inbound(PendingInbound& p, std::vector<PeerEvent>& out) {
+    if (const HandshakeResult r = read_handshake(p.sock.get(), p.buffer, p.received);
+        r != HandshakeResult::Complete)
+        return r;
 
-    if (n < 0) {
-        if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
-            return HandshakeResult::Keep;
+    if (!verify_handshake({.torrent = torrent_, .peer_id = peer_id_, .banned = banned_}, p.buffer, p.peer))
         return HandshakeResult::Drop;
-    }
-    if (n == 0) return HandshakeResult::Drop;   // peer hung up
-
-    p.received += static_cast<size_t>(n);
-    if (p.received < 68) return HandshakeResult::Keep;
-
-    if (!verify_handshake(p.buffer, p.peer)) return HandshakeResult::Drop;
 
     const uint32_t id = promote(std::move(p.sock), p.peer, out);
-    enqueue(conns_.at(id), build_handshake(torrent_, peer_id_));
+    enqueue(conns_.at(id), build_handshake({.torrent = torrent_, .peer_id = peer_id_, .banned = banned_}));
     log(LogLevel::Debug, "handshake ok (inbound): {}:{}", p.peer.host, p.peer.port);
 
-    return HandshakeResult::Promoted;
+    return HandshakeResult::Complete;
 }
 
 void PeerManager::expire_inbound(std::chrono::seconds timeout) {
@@ -300,7 +276,7 @@ std::vector<PeerEvent> PeerManager::handle_events(const std::span<pollfd> pfds) 
                 still_pending.push_back(std::move(p));
             }
             // Drop: p stays in the old inbound_ and closes when it's replaced below.
-            // Promoted: p.sock was moved into conns_, so its destructor does nothing.
+            // Completed: p.sock was moved into conns_, so its destructor does nothing.
         }
         inbound_ = std::move(still_pending);
     }
@@ -329,7 +305,7 @@ std::vector<PeerEvent> PeerManager::handle_events(const std::span<pollfd> pfds) 
     }
 
     // 2. Established peers, walked via the ids_ snapshot from build_fds().
-    //    Peers promoted in step 1 aren't in ids_, so they're skipped this
+    //    Peers completed in step 1 aren't in ids_, so they're skipped this
     //    round and polled from the next build_fds().
     std::vector<uint32_t> to_drop;
     for (size_t k = 0; k < ids_.size(); ++k) {
@@ -855,7 +831,7 @@ bool PeerManager::start_dial(const Peer& peer) {
     return true;
 }
 
-PeerManager::HandshakeResult PeerManager::advance_outbound(PendingOutbound& p, short rev,
+HandshakeResult PeerManager::advance_outbound(PendingOutbound& p, short rev,
                                                            std::vector<PeerEvent>& out) {
     if (p.phase == PendingOutbound::Phase::Connecting) {
         int err = 0;
@@ -867,7 +843,7 @@ PeerManager::HandshakeResult PeerManager::advance_outbound(PendingOutbound& p, s
             return HandshakeResult::Drop;
         }
 
-        const auto hs = build_handshake(torrent_, peer_id_);
+        const auto hs = build_handshake({.torrent = torrent_, .peer_id = peer_id_, .banned = banned_});
         const ssize_t w = ::send(p.sock.get(), hs.data(), hs.size(), MSG_NOSIGNAL);
         if (w != static_cast<ssize_t>(hs.size())) {
             log(LogLevel::Debug, "Partial handshake write to {}:{}",
@@ -883,23 +859,17 @@ PeerManager::HandshakeResult PeerManager::advance_outbound(PendingOutbound& p, s
     // behind its handshake (usually the bitfield) stays for the normal path.
     if (!(rev & (POLLIN | POLLERR | POLLHUP))) return HandshakeResult::Keep;
 
-    const ssize_t n = ::recv(p.sock.get(), p.buffer.data() + p.received, 68 - p.received, 0);
-    if (n < 0) {
-        if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
-            return HandshakeResult::Keep;
+    if (const HandshakeResult r = read_handshake(p.sock.get(), p.buffer, p.received);
+        r != HandshakeResult::Complete)
+        return r;
+
+    if (!verify_handshake({.torrent = torrent_, .peer_id = peer_id_, .banned = banned_}, p.buffer, p.peer))
         return HandshakeResult::Drop;
-    }
-    if (n == 0) return HandshakeResult::Drop;
-
-    p.received += static_cast<size_t>(n);
-    if (p.received < 68) return HandshakeResult::Keep;
-
-    if (!verify_handshake(p.buffer, p.peer)) return HandshakeResult::Drop;
 
     promote(std::move(p.sock), p.peer, out);
     log(LogLevel::Debug, "handshake ok (outbound): {}:{}", p.peer.host, p.peer.port);
 
-    return HandshakeResult::Promoted;
+    return HandshakeResult::Complete;
 }
 
 void PeerManager::expire_outbound() {
@@ -913,28 +883,6 @@ void PeerManager::expire_outbound() {
             ++it;
         }
     }
-}
-
-bool PeerManager::verify_handshake(const std::array<uint8_t, 68>& hs, const Peer& peer) const {
-    // catches connections that were already mid-handshake when their host got banned
-    if (banned_.contains(peer.host)) {
-        log(LogLevel::Debug, "{}: banned, dropping", peer.host);
-        return false;
-    }
-    if (hs[0] != 19 || std::memcmp(hs.data() + 1, "BitTorrent protocol", 19) != 0) {
-        log(LogLevel::Debug, "{}: bad protocol header", peer.host);
-        return false;
-    }
-    if (std::memcmp(hs.data() + 28, torrent_.info_hash.data(), 20) != 0) {
-        log(LogLevel::Debug, "{}: info hash mismatch", peer.host);
-        return false;
-    }
-    // Trackers hand our own address back to us; without this we'd connect to ourselves.
-    if (std::memcmp(hs.data() + 48, peer_id_.data(), 20) == 0) {
-        log(LogLevel::Debug, "{}: that is us, dropping", peer.host);
-        return false;
-    }
-    return true;
 }
 
 uint32_t PeerManager::promote(UniqueFd sock, const Peer& peer, std::vector<PeerEvent>& out) {

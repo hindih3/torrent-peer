@@ -17,6 +17,7 @@
 #include "core/unique_fd.hpp"
 #include "core/bitfield.hpp"
 #include "core/types.hpp"
+#include "utils.hpp"
 
 struct PeerEvent {
     enum Type { Choke, Unchoke, Piece, Dropped, Request, Joined } type;
@@ -60,7 +61,7 @@ struct PeerConnection {
 struct PendingInbound {
     UniqueFd                              sock;
     Peer                                  peer;
-    std::array<uint8_t, 68>               buffer{};
+    std::array<uint8_t, kHandshakeSize>   buffer{};
     size_t                                received = 0;
     std::chrono::steady_clock::time_point started{};
 };
@@ -71,7 +72,7 @@ struct PendingOutbound {
     enum class Phase { Connecting, Handshaking } phase = Phase::Connecting;
     UniqueFd                              sock;
     Peer                                  peer;
-    std::array<uint8_t, 68>               buffer{};
+    std::array<uint8_t, kHandshakeSize>   buffer{};
     size_t                                received = 0;
     std::chrono::steady_clock::time_point deadline{};
 };
@@ -121,8 +122,6 @@ public:
     bool   listening()   const { return listen_sock_.valid(); }
 
 private:
-    enum class HandshakeResult { Keep, Drop, Promoted };
-
     std::unordered_map<uint32_t, PeerConnection> conns_;
     std::vector<PendingInbound> inbound_;
     std::vector<PendingOutbound> outbound_;
@@ -155,8 +154,6 @@ private:
                                      std::vector<PeerEvent>& out);
     void            expire_outbound();
 
-    [[nodiscard]] bool verify_handshake(const std::array<uint8_t, 68>& hs,
-                                        const Peer& peer) const;
     uint32_t           promote(UniqueFd sock, const Peer& peer, std::vector<PeerEvent>& out);
     static std::string key(const Peer& p) { return p.host + ":" + p.port; }
 
