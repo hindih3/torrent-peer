@@ -11,7 +11,7 @@
 
 #include "core/log.hpp"
 #include "core/peer_id.hpp"
-#include "runtime/managers/peers/peer_manager.hpp"
+#include "runtime/peer/peer_manager.hpp"
 
 int main(int argc, char** argv) {
     if (argc < 2) {

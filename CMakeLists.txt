@@ -35,13 +35,13 @@ add_library(torrent_peer_lib STATIC
         src/metainfo/parser.cpp
         src/metainfo/torrent.cpp
         src/runtime/session.cpp
-        src/runtime/managers/ban_manager.cpp
-        src/runtime/managers/disk_manager.cpp
-        src/runtime/managers/peers/peer_manager.cpp
-        src/runtime/managers/piece_manager.cpp
-        src/runtime/managers/tracker_manager.cpp
-        src/runtime/managers/peers/inbound.cpp
-        src/runtime/managers/peers/outbound.cpp
+        src/runtime/ban/ban_manager.cpp
+        src/runtime/disk/disk_manager.cpp
+        src/runtime/peer/peer_manager.cpp
+        src/runtime/piece/piece_manager.cpp
+        src/runtime/tracker/tracker_manager.cpp
+        src/runtime/peer/inbound.cpp
+        src/runtime/peer/outbound.cpp
 )
 target_compile_definitions(torrent_peer_lib PUBLIC
         TP_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}

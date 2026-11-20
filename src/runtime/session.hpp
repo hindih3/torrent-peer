@@ -1,11 +1,11 @@
 #pragma once
 #include <atomic>
 #include <string_view>
-#include "managers/piece_manager.hpp"
-#include "managers/peers/peer_manager.hpp"
-#include "managers/disk_manager.hpp"
-#include "managers/tracker_manager.hpp"
-#include "managers/ban_manager.hpp"
+#include "piece/piece_manager.hpp"
+#include "peer/peer_manager.hpp"
+#include "disk/disk_manager.hpp"
+#include "tracker/tracker_manager.hpp"
+#include "ban/ban_manager.hpp"
 #include "metainfo/torrent.hpp"
 
 class Session {
