@@ -62,7 +62,7 @@ struct PeerConnection {
 class PeerManager {
 public:
     PeerManager(const TorrentFile& torrent, std::string peer_id,
-                uint16_t listen_port, size_t max_peers = 60);
+                uint16_t listen_port, size_t max_peers);
 
     PeerManager(const PeerManager&)            = delete;
     PeerManager& operator=(const PeerManager&) = delete;

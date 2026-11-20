@@ -10,6 +10,7 @@ struct Args {
     std::filesystem::path torrent_path;
     std::filesystem::path out_dir = "downloads";
     uint16_t port = 51413;
+    size_t max_peers = 60;
     bool use_tracker = true;
     std::vector<Peer> manual_peers;
 };
@@ -20,5 +21,5 @@ std::string read_file(const std::filesystem::path& p);
 
 inline constexpr const char* kUsage =
     "usage: torrent-peer <file.torrent> [download-dir] "
-    "[--port N] [--peer host:port] [--no-tracker] "
+    "[--port N] [--max-peers N] [--peer host:port] [--no-tracker] "
     "[--log-level trace|debug|info|warn|error|off]\n";
