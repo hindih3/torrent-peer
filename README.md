@@ -37,6 +37,7 @@ Developed on Ubuntu 24.04; also works under WSL2.
 | Option | Description |
 | --- | --- |
 | `--port N` | Port to listen on for inbound peers (1024–65535, also advertised to trackers). Default 51413. |
+| `--max-peers N` | Maximum peers, connected or mid-handshake. Default 60. |
 | `--peer host:port` | Add a peer manually. May be repeated. Combines with tracker-discovered peers. |
 | `--no-tracker` | Skip tracker contact and use only `--peer` addresses. |
 | `--log-level LEVEL` | `trace`, `debug`, `info` (default), `warn`, `error`, or `off`. |
@@ -220,6 +221,8 @@ tools, such as `LLVMFuzzerTestOneInput`, are excluded in `.clang-tidy`.
 - Requests that arrive while a peer's write queue is full (4 MiB) are dropped
   rather than deferred, so that peer has to wait for its own timeout to ask again
 - One fd per file for huge torrents can potentially trigger the per-process soft limit
+- Setting `--max-peers` above the system's open-file limit (often 1024) makes
+  connections fail with `EMFILE` instead of being capped
 
 ## References
 
