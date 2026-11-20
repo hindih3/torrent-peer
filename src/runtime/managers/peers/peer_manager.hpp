@@ -17,7 +17,7 @@
 #include "core/unique_fd.hpp"
 #include "core/bitfield.hpp"
 #include "core/types.hpp"
-#include "utils.hpp"
+#include "handshake.hpp"
 
 #include "inbound.hpp"
 #include "outbound.hpp"

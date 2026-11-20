@@ -6,7 +6,7 @@
 #include <vector>
 #include <poll.h>
 
-#include "utils.hpp"
+#include "handshake.hpp"
 #include "core/unique_fd.hpp"
 
 // A dialed socket that has not finished its handshake yet:
