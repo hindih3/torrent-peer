@@ -98,7 +98,7 @@ PeerManager::PeerManager(const TorrentFile& torrent, std::string peer_id,
     : torrent_(torrent),
       peer_id_(std::move(peer_id)),
       ctx_({torrent_, peer_id_, banned_}),
-      inbound_(ctx_, listen_port, max_peers),
+      inbound_(ctx_, listen_port),
       outbound_(ctx_),
       piece_count_(static_cast<uint32_t>(torrent.pieces.size())),
       max_peers_(max_peers),
@@ -260,7 +260,7 @@ std::vector<PeerEvent> PeerManager::handle_events(const std::span<pollfd> pfds) 
 
     // 6. Accept new inbound connections. This adds to inbound_, so it must
     //    come after every indexed loop above.
-    inbound_.accept(in, conns_.size() + outbound_.size());
+    inbound_.accept(in, free_slots());
 
     // 7. Refill any slots freed this loop. New sockets join the next build_fds().
     outbound_.refill(free_slots());
