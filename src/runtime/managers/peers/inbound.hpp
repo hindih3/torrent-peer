@@ -2,7 +2,7 @@
 #include <sys/poll.h>
 #include <span>
 
-#include "utils.hpp"
+#include "handshake.hpp"
 #include "core/unique_fd.hpp"
 
 // An accepted socket that has not finished its handshake yet. Kept out of
