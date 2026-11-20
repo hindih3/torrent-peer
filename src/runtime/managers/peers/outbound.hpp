@@ -4,7 +4,7 @@
 #include <string>
 #include <unordered_set>
 #include <vector>
-#include <poll.h>
+#include <sys/poll.h>
 
 #include "handshake.hpp"
 #include "core/unique_fd.hpp"

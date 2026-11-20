@@ -1,17 +1,16 @@
 #pragma once
 
 #include <cstdint>
-#include <iosfwd>
 #include <string>
 #include <deque>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
-#include <poll.h>
+#include <sys/poll.h>
 #include <span>
-#include <array>
 #include <random>
 #include <optional>
+#include <chrono>
 
 #include "metainfo/torrent.hpp"
 #include "core/unique_fd.hpp"
