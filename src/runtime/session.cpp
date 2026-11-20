@@ -22,13 +22,13 @@ namespace {
 }
 
 Session::Session(const TorrentFile& torrent, std::vector<Peer> initial_peers,
-                 const std::filesystem::path& download_dir,
+                 const std::filesystem::path& download_dir, size_t max_peers,
                  uint16_t listen_port, bool use_trackers)
     : torrent_(torrent),
       peer_id_(generate_peer_id()),
       disk_(torrent, download_dir),
       pieces_(torrent),
-      peers_(torrent, peer_id_, listen_port),
+      peers_(torrent, peer_id_, listen_port, max_peers),
       trackers_(torrent, peer_id_, listen_port),
       use_trackers_(use_trackers)
 {

@@ -22,6 +22,16 @@ namespace {
         return static_cast<uint16_t>(v);
     }
 
+    size_t parse_max_peers(std::string_view s) {
+        if (s.starts_with('-'))
+            usage_error(std::format("negative peer count: {}", s));
+        size_t v = 0;
+        auto [p, ec] = std::from_chars(s.data(), s.data() + s.size(), v);
+        if (ec != std::errc{} || p != s.data() + s.size())
+            usage_error(std::format("failed to parse a number: {}", s));
+        return v;
+    }
+
     Peer parse_peer(std::string_view s) {
         const size_t colon = s.rfind(':');
         if (colon == std::string_view::npos || colon == 0 || colon + 1 == s.size())
@@ -42,6 +52,7 @@ Args parse_args(int argc, char* argv[]) {
         };
 
         if      (a == "--port")       args.port = parse_port(value());
+        else if (a == "--max-peers")  args.max_peers = parse_max_peers(value());
         else if (a == "--peer")       args.manual_peers.push_back(parse_peer(value()));
         else if (a == "--no-tracker") args.use_tracker = false;
         else if (a == "--log-level") {

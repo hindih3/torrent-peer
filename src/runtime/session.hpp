@@ -11,7 +11,7 @@
 class Session {
 public:
     Session(const TorrentFile& torrent, std::vector<Peer> initial_peers,
-        const std::filesystem::path& download_dir,
+        const std::filesystem::path& download_dir, size_t max_peers,
         uint16_t listen_port, bool use_trackers);
     void run(const std::atomic<bool>& shutdown);
 
