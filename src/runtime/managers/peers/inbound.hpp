@@ -17,13 +17,13 @@ struct PendingInbound {
 
 class Inbound {
 public:
-    Inbound(const HandshakeContext &ctx, uint16_t port, size_t max_peers);
+    Inbound(const HandshakeContext &ctx, uint16_t port);
 
     void append_fds(std::vector<pollfd>& pfds) const;               // [listen?][pending...]
     std::vector<CompletedHandshake> advance(std::span<const pollfd> fds);
 
     void expire();
-    void accept(std::span<const pollfd> fds, size_t others);
+    void accept(std::span<const pollfd> fds, size_t free_slots);
 
     [[nodiscard]] size_t size()      const { return pending_.size(); }
     [[nodiscard]] bool   empty()     const { return pending_.empty() && !listen_sock_; }
@@ -32,8 +32,7 @@ public:
 private:
     HandshakeContext                ctx_;
     UniqueFd                        listen_sock_;
-    size_t                          max_peers_;
     std::vector<PendingInbound>     pending_;
 
-    HandshakeResult advance_one(PendingInbound &p);
+    HandshakeResult advance_one(PendingInbound& p);
 };

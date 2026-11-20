@@ -36,10 +36,8 @@ namespace {
     }
 }
 
-Inbound::Inbound(const HandshakeContext &ctx, uint16_t port, size_t max_peers)
-    : ctx_(ctx),
-      listen_sock_(build_listen_fd(port)),
-      max_peers_(max_peers) {}
+Inbound::Inbound(const HandshakeContext &ctx, uint16_t port)
+    : ctx_(ctx), listen_sock_(build_listen_fd(port)) {}
 
 void Inbound::append_fds(std::vector<pollfd>& pfds) const {
     if (listen_sock_)
@@ -96,7 +94,7 @@ void Inbound::expire() {
 
 // Drain the backlog. A single poll wakeup can cover several pending
 // connections, so this loops until accept() says there is nothing left.
-void Inbound::accept(const std::span<const pollfd> fds, const size_t others) {
+void Inbound::accept(const std::span<const pollfd> fds, size_t free_slots) {
     if (!listen_sock_ || !(fds[0].revents & POLLIN)) return;
 
     while (true) {
@@ -109,7 +107,7 @@ void Inbound::accept(const std::span<const pollfd> fds, const size_t others) {
             break;   // EAGAIN/EWOULDBLOCK: backlog drained
         }
 
-        if (others + pending_.size() >= max_peers_) {
+        if (free_slots == 0) {
             continue;  // sock closes here: at capacity, let them retry later
         }
 
@@ -128,6 +126,7 @@ void Inbound::accept(const std::span<const pollfd> fds, const size_t others) {
             .peer    = std::move(peer),
             .started = std::chrono::steady_clock::now()
         });
+        --free_slots;
     }
 }
 
