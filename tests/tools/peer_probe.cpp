@@ -2,6 +2,7 @@
 //   ./build-debug/peer-probe <file.torrent> [seconds]   (default 60)
 
 //   pkill -f fake_peers.py
+#include <chrono>
 #include <poll.h>
 #include <fstream>
 #include <iostream>
@@ -10,7 +11,7 @@
 
 #include "core/log.hpp"
 #include "core/peer_id.hpp"
-#include "../../src/runtime/managers/peers/peer_manager.hpp"
+#include "runtime/managers/peers/peer_manager.hpp"
 
 int main(int argc, char** argv) {
     if (argc < 2) {

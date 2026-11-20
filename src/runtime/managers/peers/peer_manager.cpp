@@ -2,24 +2,20 @@
 
 #include <algorithm>
 #include <cassert>
-#include <charconv>
 #include <cstring>
-#include <fcntl.h>
 #include <arpa/inet.h>
 #include <poll.h>
 #include <ranges>
 #include <sys/socket.h>
 #include <unistd.h>
+
 #include "metainfo/torrent.hpp"
 #include "core/log.hpp"
 
 namespace {
-    constexpr size_t kMaxHalfOpen    = 20;   // concurrent dials, leaves room for inbound
-    constexpr size_t kMaxCandidates  = 1000;    // bound on queued addresses
     constexpr size_t kMaxQueuedBytes = (1 << 22);  // 4 MiB
     constexpr size_t kRegularSlots   = 7;
 
-    constexpr auto   kConnectTimeout    = std::chrono::seconds(10);
     constexpr auto   kKeepAliveInterval = std::chrono::seconds(60);
     constexpr auto   kIdleTimeout       = std::chrono::seconds(150);
 
@@ -103,6 +99,7 @@ PeerManager::PeerManager(const TorrentFile& torrent, std::string peer_id,
       peer_id_(std::move(peer_id)),
       ctx_({torrent_, peer_id_, banned_}),
       inbound_(ctx_, listen_port, max_peers),
+      outbound_(ctx_),
       piece_count_(static_cast<uint32_t>(torrent.pieces.size())),
       max_peers_(max_peers),
       piece_frequency_(torrent.pieces.size(), 0),
@@ -125,10 +122,8 @@ std::vector<pollfd> PeerManager::build_fds() {
     // Connecting sockets become writable when the TCP connect finishes;
     // handshaking ones become readable when the peer's reply arrives.
     outbound_at_ = pfds.size();
-    for (const auto& o : outbound_) {
-        const short ev = o.phase == PendingOutbound::Phase::Connecting ? POLLOUT : POLLIN;
-        pfds.push_back({.fd = o.sock.get(), .events = ev, .revents = 0});
-    }
+    outbound_.append_fds(pfds);
+    outbound_len_ = pfds.size() - outbound_at_;
 
     conns_at_ = pfds.size();
     // refresh stale id list
@@ -160,28 +155,10 @@ std::vector<PeerEvent> PeerManager::handle_events(const std::span<pollfd> pfds) 
         enqueue(conns_.at(id), build_handshake(ctx_));
     }
 
-    // 1b. Outbound connects and handshakes, same pattern as 1a.
-    //     Only outbound peers are in known_, so only they are erased on Drop.
-    if (!outbound_.empty()) {
-        std::vector<PendingOutbound> still_pending;
-        still_pending.reserve(outbound_.size());
-
-        for (size_t i = 0; i < outbound_.size(); ++i) {
-            assert(outbound_at_ + i < pfds.size());
-            PendingOutbound& p = outbound_[i];
-            assert(pfds[outbound_at_ + i].fd == p.sock.get());
-            const short rev = pfds[outbound_at_ + i].revents;
-
-            const HandshakeResult r = rev ? advance_outbound(p, rev, events)
-                                          : HandshakeResult::Keep;
-            if (r == HandshakeResult::Keep) {
-                still_pending.push_back(std::move(p));
-            } else if (r == HandshakeResult::Drop) {
-                known_.erase(key(p.peer));
-            }
-        }
-        outbound_ = std::move(still_pending);
-    }
+    // 1b. Outbound handshakes: promote each one that verified. Ours already went out.
+    const auto out = pfds.subspan(outbound_at_, outbound_len_);
+    for (auto& [sock, peer] : outbound_.advance(out))
+        promote(std::move(sock), peer, events);
 
     // 2. Established peers, walked via the ids_ snapshot from build_fds().
     //    Peers promoted in step 1 aren't in ids_, so they're skipped this
@@ -279,14 +256,14 @@ std::vector<PeerEvent> PeerManager::handle_events(const std::span<pollfd> pfds) 
 
     // 5. Expire handshakes and connects that took too long.
     inbound_.expire();
-    expire_outbound();
+    outbound_.expire();
 
     // 6. Accept new inbound connections. This adds to inbound_, so it must
     //    come after every indexed loop above.
     inbound_.accept(in, conns_.size() + outbound_.size());
 
     // 7. Refill any slots freed this loop. New sockets join the next build_fds().
-    dial_more();
+    outbound_.refill(free_slots());
 
     return events;
 }
@@ -612,7 +589,7 @@ void PeerManager::drop(uint32_t id, std::vector<PeerEvent>& out) {
     if (it == conns_.end()) return;
 
     apply_availability(it->second.has_pieces, -1);
-    known_.erase(key(it->second.peer));
+    outbound_.forget(it->second.peer);
 
     // record pending requests before dropping peer, so
     // PieceManager is able to know what requests to reset
@@ -647,119 +624,14 @@ bool PeerManager::can_queue(uint32_t peer_id) const {
 }
 
 void PeerManager::add_peers(std::vector<Peer> peers) {
-    size_t added = 0;
-    for (auto& p : peers) {
-        if (candidates_.size() >= kMaxCandidates) break;
-        if (!known_.insert(key(p)).second) continue;
-        candidates_.push_back(std::move(p));
-        ++added;
-    }
-    log(LogLevel::Debug, "queued {} new peer(s), {} waiting", added, candidates_.size());
-    dial_more();
+    outbound_.add(std::move(peers));
+    outbound_.refill(free_slots());
 }
 
-void PeerManager::dial_more() {
-    while (!candidates_.empty()
-           && outbound_.size() < kMaxHalfOpen
-           && conns_.size() + inbound_.size() + outbound_.size() < max_peers_) {
-        Peer p = std::move(candidates_.front());
-        candidates_.pop_front();
-        if (banned_.contains(p.host) || !start_dial(p)) known_.erase(key(p));
-    }
-}
-
-bool PeerManager::start_dial(const Peer& peer) {
-    sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-
-    uint16_t port = 0;
-    const char* first = peer.port.data();
-    const char* last  = first + peer.port.size();
-    auto [end, ec] = std::from_chars(first, last, port);
-    if (ec != std::errc{} || end != last || port == 0 ||
-        inet_pton(AF_INET, peer.host.c_str(), &addr.sin_addr) != 1) {
-        log(LogLevel::Debug, "outbound {}:{}: bad address", peer.host, peer.port);
-        return false;
-    }
-    addr.sin_port = htons(port);
-
-    UniqueFd sock(::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0));
-    if (!sock) {
-        log(LogLevel::Warn, "outbound socket() failed: {}", strerror(errno));
-        return false;
-    }
-
-    // Non-blocking connect: EINPROGRESS is the normal answer. The result
-    // arrives later as POLLOUT, and SO_ERROR says whether it worked.
-    if (::connect(sock.get(), reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0
-        && errno != EINPROGRESS) {
-        log(LogLevel::Debug, "outbound {}:{}: connect failed: {}",
-            peer.host, peer.port, strerror(errno));
-        return false;                               // sock closes here
-    }
-
-    outbound_.push_back({
-        .sock     = std::move(sock),
-        .peer     = peer,
-        .deadline = std::chrono::steady_clock::now() + kConnectTimeout,
-    });
-
-    log(LogLevel::Trace, "dialing {}:{}", peer.host, peer.port);
-    return true;
-}
-
-HandshakeResult PeerManager::advance_outbound(PendingOutbound& p, short rev,
-                                                           std::vector<PeerEvent>& out) {
-    if (p.phase == PendingOutbound::Phase::Connecting) {
-        int err = 0;
-        socklen_t len = sizeof(err);
-        if (getsockopt(p.sock.get(), SOL_SOCKET, SO_ERROR, &err, &len) < 0) err = errno;
-        if (err != 0) {
-            log(LogLevel::Trace, "outbound {}:{}: connect failed: {}",
-                p.peer.host, p.peer.port, strerror(err));
-            return HandshakeResult::Drop;
-        }
-
-        const auto hs = build_handshake(ctx_);
-        const ssize_t w = ::send(p.sock.get(), hs.data(), hs.size(), MSG_NOSIGNAL);
-        if (w != static_cast<ssize_t>(hs.size())) {
-            log(LogLevel::Debug, "Partial handshake write to {}:{}",
-                p.peer.host, p.peer.port);
-        }
-
-        p.phase    = PendingOutbound::Phase::Handshaking;
-        p.deadline = std::chrono::steady_clock::now() + kHandshakeTimeout;
-        return HandshakeResult::Keep;
-    }
-
-    // Handshaking: same capped read as inbound, so anything the peer sends
-    // behind its handshake (usually the bitfield) stays for the normal path.
-    if (!(rev & (POLLIN | POLLERR | POLLHUP))) return HandshakeResult::Keep;
-
-    if (const HandshakeResult r = read_handshake(p.sock.get(), p.buffer, p.received);
-        r != HandshakeResult::Complete)
-        return r;
-
-    if (!verify_handshake(ctx_, p.buffer, p.peer))
-        return HandshakeResult::Drop;
-
-    promote(std::move(p.sock), p.peer, out);
-    log(LogLevel::Debug, "handshake ok (outbound): {}:{}", p.peer.host, p.peer.port);
-
-    return HandshakeResult::Complete;
-}
-
-void PeerManager::expire_outbound() {
-    const auto now = std::chrono::steady_clock::now();
-    for (auto it = outbound_.begin(); it != outbound_.end(); ) {
-        if (now >= it->deadline) {
-            log(LogLevel::Trace, "outbound {}:{}: timed out", it->peer.host, it->peer.port);
-            known_.erase(key(it->peer));
-            it = outbound_.erase(it);
-        } else {
-            ++it;
-        }
-    }
+// slots left under max_peers_, counting connected peers and both handshake queues
+size_t PeerManager::free_slots() const {
+    const size_t used = conns_.size() + inbound_.size() + outbound_.size();
+    return used < max_peers_ ? max_peers_ - used : 0;
 }
 
 uint32_t PeerManager::promote(UniqueFd sock, const Peer& peer, std::vector<PeerEvent>& out) {

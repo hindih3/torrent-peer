@@ -20,6 +20,7 @@
 #include "utils.hpp"
 
 #include "inbound.hpp"
+#include "outbound.hpp"
 
 struct PeerEvent {
     enum Type { Choke, Unchoke, Piece, Dropped, Request, Joined } type;
@@ -56,17 +57,6 @@ struct PeerConnection {
     std::deque<std::vector<uint8_t>> write_buffer;  // one whole message per element
     size_t cursor = 0;  // bytes of write_buffer.front() already handed to the kernel
     size_t queued_bytes = 0;
-};
-
-// Two phases: waiting for the TCP connect to
-// finish, then waiting for the peer's 68-byte handshake reply.
-struct PendingOutbound {
-    enum class Phase { Connecting, Handshaking } phase = Phase::Connecting;
-    UniqueFd                              sock;
-    Peer                                  peer;
-    std::array<uint8_t, kHandshakeSize>   buffer{};
-    size_t                                received = 0;
-    std::chrono::steady_clock::time_point deadline{};
 };
 
 class PeerManager {
@@ -109,23 +99,20 @@ public:
     // for anything new to arrive. A seeder with an open listen socket is not
     // idle just because no one is talking to it right now.
     bool empty() const {
-        return conns_.empty() && inbound_.empty() &&
-               outbound_.empty() && candidates_.empty();
+        return conns_.empty() && inbound_.empty() && outbound_.empty();
     }
     size_t peer_count()  const { return conns_.size(); }
     bool   listening()   const { return inbound_.listening(); }
 
 private:
     std::unordered_map<uint32_t, PeerConnection> conns_;
-    std::vector<PendingOutbound> outbound_;
-    std::deque<Peer>             candidates_;   // addresses waiting for a free slot
-    std::unordered_set<std::string> known_;     // "host:port" queued, dialing or connected
     std::unordered_set<std::string> banned_;    // hosts refused for sending bad data
 
     const TorrentFile& torrent_;
     std::string        peer_id_;
     HandshakeContext   ctx_;
     Inbound            inbound_;
+    Outbound           outbound_;
     uint32_t           piece_count_;
     uint32_t           next_id_ = 0;
     size_t             max_peers_;
@@ -134,20 +121,14 @@ private:
     std::vector<uint32_t>   ids_;
     std::optional<uint32_t> optimistic_;
     std::mt19937            rng_;
-    size_t inbound_at_  = 0;
-    size_t inbound_len_ = 0;
-    size_t outbound_at_ = 0;
-    size_t conns_at_   = 0;
+    size_t inbound_at_   = 0;
+    size_t inbound_len_  = 0;
+    size_t outbound_at_  = 0;
+    size_t outbound_len_ = 0;
+    size_t conns_at_     = 0;
 
-    void            dial_more();
-    bool            start_dial(const Peer& peer);
-    HandshakeResult advance_outbound(PendingOutbound& p, short rev,
-                                     std::vector<PeerEvent>& out);
-    void            expire_outbound();
-
-    uint32_t           promote(UniqueFd sock, const Peer& peer, std::vector<PeerEvent>& out);
-    static std::string key(const Peer& p) { return p.host + ":" + p.port; }
-
+    size_t      free_slots() const;
+    uint32_t    promote(UniqueFd sock, const Peer& peer, std::vector<PeerEvent>& out);
     void        send_to(uint32_t peer_id, std::vector<uint8_t> msg);
     static void enqueue(PeerConnection& c, std::vector<uint8_t> msg);
 

@@ -43,6 +43,8 @@ add_library(torrent_peer_lib STATIC
         src/runtime/managers/peers/inbound.cpp
         src/runtime/managers/peers/inbound.hpp
         src/runtime/managers/peers/utils.hpp
+        src/runtime/managers/peers/outbound.cpp
+        src/runtime/managers/peers/outbound.hpp
 )
 target_compile_definitions(torrent_peer_lib PUBLIC
         TP_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
