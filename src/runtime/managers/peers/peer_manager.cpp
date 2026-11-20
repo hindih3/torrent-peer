@@ -7,7 +7,6 @@
 #include <poll.h>
 #include <ranges>
 #include <sys/socket.h>
-#include <unistd.h>
 
 #include "metainfo/torrent.hpp"
 #include "core/log.hpp"
