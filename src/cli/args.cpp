@@ -32,6 +32,12 @@ namespace {
         return v;
     }
 
+    PickStrategy parse_strategy(std::string_view s) {
+        if (s == "rarest-first") return PickStrategy::RarestFirst;
+        if (s == "sequential")   return PickStrategy::Sequential;
+        usage_error(std::format("--pick wants rarest-first or sequential, got: {}", s));
+    }
+
     Peer parse_peer(std::string_view s) {
         const size_t colon = s.rfind(':');
         if (colon == std::string_view::npos || colon == 0 || colon + 1 == s.size())
@@ -53,6 +59,7 @@ Args parse_args(int argc, char* argv[]) {
 
         if      (a == "--port")       args.port = parse_port(value());
         else if (a == "--max-peers")  args.max_peers = parse_max_peers(value());
+        else if (a == "--pick")       args.strategy = parse_strategy(value());
         else if (a == "--peer")       args.manual_peers.push_back(parse_peer(value()));
         else if (a == "--no-tracker") args.use_tracker = false;
         else if (a == "--log-level") {
