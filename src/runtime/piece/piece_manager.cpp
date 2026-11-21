@@ -161,7 +161,8 @@ std::optional<uint32_t> PieceManager::rarest_first(const Bitfield& peer_has,
 
     if (candidates.empty()) return std::nullopt;
 
-    return candidates[rng_() % candidates.size()];
+    std::uniform_int_distribution<size_t> dist(0, candidates.size() - 1);
+    return candidates[dist(rng_)];
 }
 
 std::optional<uint32_t> PieceManager::sequential(const Bitfield& peer_has) const {
