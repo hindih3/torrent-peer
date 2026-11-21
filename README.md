@@ -38,6 +38,7 @@ Developed on Ubuntu 24.04; also works under WSL2.
 | --- | --- |
 | `--port N` | Port to listen on for inbound peers (1024–65535, also advertised to trackers). Default 51413. |
 | `--max-peers N` | Maximum peers, connected or mid-handshake. Default 60. |
+| `--pick STRATEGY` | `rarest-first` (default) or `sequential`. Sequential downloads pieces in order, so files can be used before the download finishes. |
 | `--peer host:port` | Add a peer manually. May be repeated. Combines with tracker-discovered peers. |
 | `--no-tracker` | Skip tracker contact and use only `--peer` addresses. |
 | `--log-level LEVEL` | `trace`, `debug`, `info` (default), `warn`, `error`, or `off`. |
@@ -127,11 +128,16 @@ tools, such as `LLVMFuzzerTestOneInput`, are excluded in `.clang-tidy`.
   client until finished.
 
 
-* **Download algorithm.** Piece rarity is calculated by summing the bitfields of
-  connected peers into a frequency array. Unchoked peers receive up to 32
-  pipelined block requests each. Pipelining shifts performance from latency-bound
-  to bandwidth-bound, reducing a file’s download time from 154s with one request 
-  to 34s with 32 (~4.5× faster).
+* **Download algorithm.** By default, pieces are picked rarest-first: piece
+  rarity is calculated by summing the bitfields of connected peers into a
+  frequency array, and ties are broken at random. `--pick sequential` picks
+  the lowest-numbered piece a peer has instead, so files can be used before
+  the download finishes, at the cost of spreading rare pieces less well
+  through the swarm. Either way, pieces already in progress are finished
+  before new ones are started. Unchoked peers receive up to 32 pipelined
+  block requests each. Pipelining shifts performance from latency-bound to
+  bandwidth-bound, reducing a file's download time from 154s with one
+  request to 34s with 32 (~4.5× faster).
 
 
 * **Tit-for-tat choking.** Uploading to every peer at once splits the upload into
@@ -217,7 +223,9 @@ tools, such as `LLVMFuzzerTestOneInput`, are excluded in `.clang-tidy`.
 
 **Known issues**
 
-- A snubbed peer can hold one block for the 15 s request timeout (no endgame mode)
+- A peer that stops sending without choking holds all its pipelined requests (up
+  to 32 blocks) until the 15 s request timeout, then one block at a time (no endgame
+  mode). With `--pick sequential`, this leaves a gap in the file until the timeout
 - Requests that arrive while a peer's write queue is full (4 MiB) are dropped
   rather than deferred, so that peer has to wait for its own timeout to ask again
 - One fd per file for huge torrents can potentially trigger the per-process soft limit
