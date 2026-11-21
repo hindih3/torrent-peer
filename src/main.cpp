@@ -27,7 +27,8 @@ int main(int argc, char** argv) {
 
         log(LogLevel::Info, "saving to {}",
             std::filesystem::absolute(args.out_dir).string());
-        Session session(torrent, args.manual_peers, args.out_dir, args.max_peers, args.port, args.use_tracker);
+        Session session(torrent, args.manual_peers, args.out_dir, args.max_peers,
+                        args.port, args.strategy, args.use_tracker);
         session.run(g_shutdown);
     } catch (const std::exception& e) {
         std::cerr << "fatal: " << e.what() << '\n';
