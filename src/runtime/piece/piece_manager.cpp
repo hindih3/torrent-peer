@@ -6,10 +6,11 @@
 #include <limits>
 #include "core/sha1.hpp"
 
-PieceManager::PieceManager(const TorrentFile& torrent) :
+PieceManager::PieceManager(const TorrentFile& torrent, PickStrategy strategy) :
     torrent_(torrent),
     piece_count_(static_cast<uint32_t>(torrent.pieces.size())),
     have_(static_cast<uint32_t>(torrent.pieces.size())),
+    strategy_(strategy),
     rng_(std::random_device{}()) {}
 
 
@@ -24,26 +25,18 @@ PieceManager::pick_block(const Bitfield& peer_has,
         if (auto r = next_missing(index, pp)) return r;
     }
 
-    // scan all eligible new pieces, tracking the rarest and collecting ties
-    uint16_t best = std::numeric_limits<uint16_t>::max();
-    std::vector<uint32_t> candidates;
-
-    for (uint32_t i = 0; i < piece_count_; ++i) {
-        if (have_.get(i) || active_.contains(i) || !peer_has.get(i)) continue;
-
-        const uint16_t avail = availability[i];
-        if (avail < best) {
-            best = avail;
-            candidates.clear();
-        }
-        if (avail == best)
-            candidates.push_back(i); // tie
+    std::optional<uint32_t> index;
+    switch (strategy_) {
+        case PickStrategy::RarestFirst:
+            index = rarest_first(peer_has, availability);
+            break;
+        case PickStrategy::Sequential:
+            index = sequential(peer_has);
+            break;
     }
+    if (!index) return std::nullopt;
 
-    if (candidates.empty()) return std::nullopt;
-
-    uint32_t index = candidates[rng_() % candidates.size()];
-    return next_missing(index, activate(index));
+    return next_missing(index.value(), activate(index.value()));
 }
 
 BlockResult PieceManager::on_block(const Block& block) {
@@ -146,4 +139,34 @@ bool PieceManager::verify(const uint32_t index, const std::vector<uint8_t>& data
     const std::string& expected = torrent_.pieces[index];
 
     return expected.size() == 20 && std::memcmp(digest.data(), expected.data(), 20) == 0;
+}
+
+std::optional<uint32_t> PieceManager::rarest_first(const Bitfield& peer_has,
+                                                   const std::vector<uint16_t>& availability) {
+    // scan all eligible new pieces, tracking the rarest and collecting ties
+    uint16_t best = std::numeric_limits<uint16_t>::max();
+    std::vector<uint32_t> candidates;
+
+    for (uint32_t i = 0; i < piece_count_; ++i) {
+        if (have_.get(i) || active_.contains(i) || !peer_has.get(i)) continue;
+
+        const uint16_t avail = availability[i];
+        if (avail < best) {
+            best = avail;
+            candidates.clear();
+        }
+        if (avail == best)
+            candidates.push_back(i); // tie
+    }
+
+    if (candidates.empty()) return std::nullopt;
+
+    return candidates[rng_() % candidates.size()];
+}
+
+std::optional<uint32_t> PieceManager::sequential(const Bitfield& peer_has) const {
+    for (uint32_t i = 0; i < piece_count_; ++i)
+        if (!have_.get(i) && !active_.contains(i) && peer_has.get(i))
+            return i;
+    return std::nullopt;
 }

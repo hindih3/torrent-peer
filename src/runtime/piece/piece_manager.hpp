@@ -12,7 +12,7 @@
 #include "core/types.hpp"
 #include "core/bitfield.hpp"
 
-enum class BlockStatus { Incomplete, Rejected,  PieceVerified, PieceFailed};
+enum class BlockStatus { Incomplete, Rejected,  PieceVerified, PieceFailed };
 
 struct BlockResult {
     BlockStatus status = BlockStatus::Incomplete;
@@ -21,11 +21,12 @@ struct BlockResult {
 
 class PieceManager {
 public:
-    explicit PieceManager(const TorrentFile& torrent);
+    explicit PieceManager(const TorrentFile& torrent, PickStrategy strategy);
 
-    // Given a peer's bitfield, return the next block to request using
-    // a rarest-first algorithm, or nullopt if there's nothing we still
-    // need. Pieces whose owner differs from 'tag' are skipped.
+    // Given a peer's bitfield, return the next block to request, or nullopt
+    // if there's nothing we still need. Pieces already in progress come
+    // first; a new piece is chosen by the strategy given at construction.
+    // Pieces whose owner differs from 'tag' are skipped.
     std::optional<BlockRequest> pick_block(const Bitfield& peer_has,
                                            const std::vector<uint16_t>& availability,
                                            uint32_t tag);
@@ -69,12 +70,18 @@ private:
 
     std::optional<BlockRequest> next_missing(uint32_t index, PartialPiece& pp) const;
 
+    std::optional<uint32_t> rarest_first(const Bitfield& peer_has,
+                                         const std::vector<uint16_t>& availability);
+    std::optional<uint32_t> sequential(const Bitfield& peer_has) const;
+
     const TorrentFile& torrent_;
     uint32_t piece_count_;
 
     Bitfield have_;
     uint64_t have_bytes_ = 0;
     uint32_t have_count_ = 0;
+
+    PickStrategy strategy_;
     std::mt19937 rng_;
 
     std::unordered_map<uint32_t, PartialPiece> active_;

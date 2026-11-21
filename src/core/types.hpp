@@ -8,6 +8,8 @@
 
 constexpr uint32_t kBlockSize = 16384;
 
+enum class PickStrategy { RarestFirst, Sequential };
+
 struct Peer {
     std::string host;
     std::string port;
