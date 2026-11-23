@@ -51,10 +51,13 @@ public:
         os << "]\n";
     }
 
-    uint32_t size() const { return bits_; }
+    uint32_t size()  const { return bits_; }
+    uint32_t count() const { return count_; }
+    bool     full()  const { return count_ == bits_; }
     const std::vector<uint8_t>& bytes() const { return bytes_; }
 
 private:
-    uint32_t             bits_ = 0;
+    uint32_t             bits_  = 0;
+    uint32_t             count_ = 0;  // pieces accumulated
     std::vector<uint8_t> bytes_;
 };
