@@ -51,10 +51,10 @@ public:
         os << "]\n";
     }
 
-    uint32_t size()  const { return bits_; }
-    uint32_t count() const { return count_; }
-    bool     full()  const { return count_ == bits_; }
-    const std::vector<uint8_t>& bytes() const { return bytes_; }
+    [[nodiscard]] uint32_t size()  const { return bits_; }
+    [[nodiscard]] uint32_t count() const { return count_; }
+    [[nodiscard]] bool     full()  const { return count_ == bits_; }
+    [[nodiscard]] const std::vector<uint8_t>& bytes() const { return bytes_; }
 
 private:
     uint32_t             bits_  = 0;
