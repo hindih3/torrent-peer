@@ -11,6 +11,7 @@
 #include <random>
 #include <optional>
 #include <chrono>
+#include <ranges>
 
 #include "metainfo/torrent.hpp"
 #include "core/unique_fd.hpp"
@@ -87,6 +88,10 @@ public:
     // drop every connection from 'host' and refuse it from now on, inbound
     // and outbound. Returns the Dropped events for the caller to dispatch
     std::vector<PeerEvent> ban(const std::string& host);
+
+    void set_seeding() { am_seeding_ = true; }
+    std::vector<PeerEvent> on_download_complete();
+
     bool is_banned(const std::string& host) const { return banned_.contains(host); }
     bool can_queue(uint32_t peer_id) const;
 
@@ -125,6 +130,7 @@ private:
     size_t outbound_at_  = 0;
     size_t outbound_len_ = 0;
     size_t conns_at_     = 0;
+    bool am_seeding_ = false;
 
     size_t      free_slots() const;
     uint32_t    promote(UniqueFd sock, const Peer& peer, std::vector<PeerEvent>& out);

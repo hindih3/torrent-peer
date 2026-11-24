@@ -228,6 +228,13 @@ std::vector<PeerEvent> PeerManager::handle_events(const std::span<pollfd> pfds) 
             std::vector<uint8_t> msg;
             while (extract_message(c.read_buffer, msg))
                 handle_message(id, msg, events);
+
+            // a have or bitfield may have just made this peer a seeder; queue
+            // the drop, since c is still in use until step 3
+            if (am_seeding_ && c.has_pieces.full()) {
+                log(LogLevel::Debug, "peer {} dropped: seeder, and so are we", id);
+                to_drop.push_back(id);
+            }
         } catch (const std::exception& e) {
             log(LogLevel::Warn, "protocol error from {}: {}", c.peer.host, e.what());
             to_drop.push_back(id);
@@ -613,6 +620,18 @@ std::vector<PeerEvent> PeerManager::ban(const std::string& host) {
     for (uint32_t id : ids)
         drop(id, events);
     log(LogLevel::Debug, "banned {}: dropped {} connection(s)", host, ids.size());
+    return events;
+}
+
+std::vector<PeerEvent> PeerManager::on_download_complete() {
+    set_seeding();
+    std::vector<uint32_t> ids;
+    for (const auto &c: conns_ | std::views::values)
+        if (c.has_pieces.full()) ids.push_back(c.id);
+    std::vector<PeerEvent> events;
+    for (uint32_t id : ids)
+        drop(id, events);
+    log(LogLevel::Debug, "dropped {} seeders", ids.size());
     return events;
 }
 

@@ -37,7 +37,10 @@ Session::Session(const TorrentFile& torrent, std::vector<Peer> initial_peers,
     log(LogLevel::Debug, "recheck: {}/{}", pieces_.completed(), pieces_.total());
 
     completed_ = pieces_.is_complete();
-    if (completed_) log(LogLevel::Info, "all pieces already on disk | seeding");
+    if (completed_) {
+        log(LogLevel::Info, "all pieces already on disk | seeding");
+        peers_.set_seeding();
+    }
 
     peers_.add_peers(std::move(initial_peers));
 }
@@ -103,6 +106,7 @@ void Session::run(const std::atomic<bool>& shutdown) {
         if (pieces_.is_complete() && !completed_) {
             completed_ = true;
             disk_.sync();
+            for (auto& ev : peers_.on_download_complete()) dispatch(ev);
             trackers_.on_download_complete();
             log(LogLevel::Info, "download complete in {:.1f} s | seeding",
                 static_cast<double>(ms_since(started)) / 1000.0);
