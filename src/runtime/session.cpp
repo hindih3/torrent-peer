@@ -82,7 +82,7 @@ void Session::run(const std::atomic<bool>& shutdown) {
         }
 
         std::span<pollfd> all(pfds);
-        for (auto& ev : peers_.handle_events(all.first(tracker_base)))
+        for (const auto& ev : peers_.handle_events(all.first(tracker_base)))
             dispatch(ev);
         if (use_trackers_) {
             const AnnounceParams stats = {
@@ -106,7 +106,7 @@ void Session::run(const std::atomic<bool>& shutdown) {
         if (pieces_.is_complete() && !completed_) {
             completed_ = true;
             disk_.sync();
-            for (auto& ev : peers_.on_download_complete()) dispatch(ev);
+            for (const auto& ev : peers_.on_download_complete()) dispatch(ev);
             trackers_.on_download_complete();
             log(LogLevel::Info, "download complete in {:.1f} s | seeding",
                 static_cast<double>(ms_since(started)) / 1000.0);
