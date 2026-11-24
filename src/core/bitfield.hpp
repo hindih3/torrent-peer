@@ -4,6 +4,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <vector>
+#include <bit>
 
 // one bit per piece, packed into bytes, MSB first.
 // Piece 0 is bit 0x80 of byte 0. Spare bits in the last byte must be zero.
@@ -24,6 +25,7 @@ public:
         if (spare > 0 && (bf.bytes_.back() & ((1u << spare) - 1)) != 0) {
             throw std::runtime_error("bitfield: spare bits set");
         }
+        for (uint8_t b : bf.bytes_) bf.count_ += std::popcount(b);
         return bf;
     }
 
@@ -34,7 +36,10 @@ public:
 
     void set(uint32_t i) {
         if (i >= bits_) throw std::out_of_range("bitfield index");
-        bytes_[i / 8] |= static_cast<uint8_t>(1u << (7 - i % 8));
+        const auto mask = static_cast<uint8_t>(1u << (7 - i % 8));
+        if (bytes_[i / 8] & mask) return;   // already set, nothing to count
+        bytes_[i / 8] |= mask;
+        ++count_;
     }
 
     void print(std::ostream& os = std::cerr) const {
