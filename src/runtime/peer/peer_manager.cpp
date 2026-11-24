@@ -631,7 +631,7 @@ std::vector<PeerEvent> PeerManager::on_download_complete() {
     std::vector<PeerEvent> events;
     for (uint32_t id : ids)
         drop(id, events);
-    log(LogLevel::Debug, "dropped {} seeders", ids.size());
+    log(LogLevel::Debug, "dropped {} seeder(s)", ids.size());
     return events;
 }
 
