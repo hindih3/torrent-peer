@@ -29,7 +29,7 @@ public:
         return bf;
     }
 
-    bool get(uint32_t i) const {
+    [[nodiscard]] bool get(uint32_t i) const {
         if (i >= bits_) return false;
         return (bytes_[i / 8] >> (7 - (i % 8))) & 1u;
     }
